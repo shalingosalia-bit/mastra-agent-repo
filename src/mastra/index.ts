@@ -1,0 +1,14 @@
+import { Mastra } from "@mastra/core/mastra";
+import { LibSQLStore } from "@mastra/libsql";
+import { comparisonAgent } from "./agents/comparison";
+import { memoAgent } from "./agents/memo";
+import { screeningAgent } from "./agents/screening";
+import { dealReviewSupervisor } from "./agents/supervisor";
+import { taskAgent } from "./agents/task";
+import { pocRoutes } from "./foundation/routes";
+
+export const mastra = new Mastra({
+  agents: { dealReviewSupervisor, screeningAgent, comparisonAgent, taskAgent, memoAgent },
+  storage: new LibSQLStore({ id: "deal-review", url: process.env.MASTRA_DB_URL ?? "file:./mastra.db" }),
+  server: { apiRoutes: pocRoutes },
+});

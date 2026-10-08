@@ -1,0 +1,7 @@
+node_modules
+.mastra
+dist
+.env
+.DS_Store
+mastra.db*
+*.db
