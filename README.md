@@ -26,6 +26,16 @@ Then open the **review panel** at http://localhost:4111/poc/review:
 
 The DealLead accepts proposals only in the panel. The supervisor can't accept, save or submit anything.
 
+### Screening as a workflow
+
+**Workflows → deal-screening** runs the screening step with the DealLead's confirmation enforced by the engine rather than the supervisor's instructions (`workflows/deal-screening.ts`):
+
+1. Run it with `{"deal": "Riverside Flats", "criteria": ["Multifamily only", "Cap rate at least 5.5%", "Asking price under $60M"]}`. The screening specialist maps each criterion, and the run suspends at `confirm-mapping`, showing the mapping. Nothing is checked yet.
+2. Resume with `{"confirmed": true}`, or correct a criterion first: `{"confirmed": true, "corrections": [{"criterion": "Asking price under $60M", "fieldKey": "purchase_price", "test": {"operator": "<", "target": 60000000}}]}`. `{"confirmed": false}` stops without checking.
+3. The result is the verdict table. The run's session record is at `/poc/sessions/<runId>`.
+
+A field the model names that doesn't exist, or that the User can't read, becomes a question instead of a mapping.
+
 Request context keys: `userRole` (`DealLead` or `Analyst`), `userId` (`U-1` Dana Kim, `U-2` Raj Patel) and `tenantId` (`T-demo`). As an Analyst, the seller reserve becomes Unknown. `Lamar Station` has only two comps, so the comparison refuses to flag.
 
 ## What the POC tests, by layer
