@@ -59,7 +59,7 @@ Request context keys: `userRole` (`DealLead` or `Analyst`), `userId` (`U-1` Dana
 
 | Layer (brief §Foundation by Layer) | Where |
 |---|---|
-| Orchestration: route, hand off, park, stop at bounds | `agents/supervisor.ts`, `foundation/bounds.ts`: 25 steps, 8 per specialist, 60 s per run, $0.50 per run. Parked time between turns doesn't count |
+| Orchestration: route, hand off, park, stop at bounds | `agents/supervisor.ts`, `foundation/bounds.ts`: 25 steps, 8 per specialist, 60 s per run, $2 per run (the Solution Profile caps at $0.50; set `MASTRA_RUN_COST_BOUND_USD` to change it). Parked time between turns doesn't count |
 | Agent registry, versioned | `foundation/registry.ts`. Every session activity records the agent's version |
 | Guardrails | `foundation/guard.ts`: a tool runs only if both the User and the agent hold its grant. `foundation/kill-switch.ts`: one switch per Tenant aborts its running sessions and refuses every tool |
 | Proposals | `foundation/proposals.ts`: one proposal per act; accepting twice yields one work item |

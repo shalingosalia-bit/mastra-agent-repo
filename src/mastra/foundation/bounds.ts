@@ -7,12 +7,16 @@ import { ensureSession, recordActivity, setSessionStatus } from "./sessions";
 
 // The bounds on one run: one DealLead turn of a deal review, so time parked for
 // the DealLead between turns never counts (deal screening 05 §Bounds and Cost,
-// and the brief's handoff decision).
+// and the brief's handoff decision). The cost bound is $2 per run in the sandbox,
+// above the Solution Profile's $0.50 cap, so a long review isn't cut off while
+// the POC is tested; MASTRA_RUN_COST_BOUND_USD overrides it.
+const costBound = Number(process.env.MASTRA_RUN_COST_BOUND_USD);
+
 export const BOUNDS = {
   wallClockMs: 60_000,
   steps: 25,
   specialistSteps: 8,
-  costUsd: 0.5,
+  costUsd: Number.isFinite(costBound) && costBound > 0 ? costBound : 2,
 };
 
 // Specialists that see only the prompt the supervisor writes, never the

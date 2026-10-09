@@ -236,10 +236,10 @@ describe("bounds", () => {
   it("refuses further delegation once the cost bound is reached", async () => {
     const { opts } = run();
     await start(opts, new RequestContext());
-    // $0.55 of specialist usage at Sonnet 5.5 rates.
+    // $6 of specialist usage at Sonnet 5.5 rates, past the $2 bound.
     await opts.delegation.onDelegationComplete({
       primitiveId: "screening", runId: "R-1", duration: 10, success: true,
-      result: { usage: { inputTokens: 200_000, outputTokens: 15_000, totalTokens: 215_000 } },
+      result: { usage: { inputTokens: 2_000_000, outputTokens: 0, totalTokens: 2_000_000 } },
     });
     const r = await start(opts, new RequestContext(), "comparison");
     expect(r).toMatchObject({ proceed: false });

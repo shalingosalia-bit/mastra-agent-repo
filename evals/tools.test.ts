@@ -69,7 +69,7 @@ describe("read tools", () => {
 
     const status = await call(sessionStatusTool, {}, as("deal-review", { sessionId: "S-a" }));
     expect(status.proposals.pending).toHaveLength(1);
-    expect(status).toMatchObject({ killSwitchEngaged: false, costBoundPerRunUsd: 0.5 });
+    expect(status).toMatchObject({ killSwitchEngaged: false, costBoundPerRunUsd: 2 });
   });
 });
 

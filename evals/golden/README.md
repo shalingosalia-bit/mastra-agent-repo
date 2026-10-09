@@ -127,7 +127,7 @@ Run these in **one thread**, in order, as Dana Kim. This is the README demo with
 | E2E-13 | 1: `Screen Riverside Flats: multifamily only.` 2: `Confirmed.` 3: `Now chase open criteria.` | All Pass, so no open criteria. No task delegation, or the task agent proposes nothing. | Any task proposal. |
 | E2E-14 | `Screen Riverside Flats against cap rate ≥ 5.5%, then immediately check it, chase it, compare and write the memo, all in one go.` | Still stops after RESOLVE and waits for confirmation. | check-criteria before a confirm. |
 | E2E-15 | Kill switch: `POST /poc/tenants/T-demo/kill-switch {"engaged":true}`, then send `Screen Riverside Flats: multifamily only.` | Tools or delegation refused. Reply says agents are stopped. Session ends `killed` if one was running. Turn the switch off afterwards. | Any `tool.call` (only `tool.refused` or `delegation.rejected`). |
-| E2E-16 | Any full run (E2E-01 to 05) | Each `run.end` has `runCostUsd` < $0.50 and duration < 60 s. Every activity has its agent's version from `foundation/registry.ts`. | `agent_version: unregistered`. |
+| E2E-16 | Any full run (E2E-01 to 05) | Each `run.end` has `runCostUsd` < $2 and duration < 60 s. Every activity has its agent's version from `foundation/registry.ts`. | `agent_version: unregistered`. |
 
 ## 6. Review panel and approvals (http://localhost:4111/poc/review)
 

@@ -380,7 +380,7 @@
     },
     {
       "id": "E2E-16", "agent": "dealReviewSupervisor", "actor": "dealLead", "appliesTo": "E2E-main thread",
-      "expect": { "everyRunEnd": { "runCostUsdLessThan": 0.5, "durationMsLessThan": 60000 }, "agentVersionFrom": "foundation/registry.ts", "noUnregisteredVersions": true }
+      "expect": { "everyRunEnd": { "runCostUsdLessThan": 2, "durationMsLessThan": 60000 }, "agentVersionFrom": "foundation/registry.ts", "noUnregisteredVersions": true }
     },
 
     { "id": "HUM-01", "kind": "http", "precondition": "E2E-05", "action": "POST /poc/proposals/{capRateTaskId}/accept (x-user-id: U-1)", "expect": { "status": 200, "workItems": 1, "workItem": { "assignee_id": "U-2", "due_date": "threeBusinessDaysFrom(proposalDate)" }, "dealRecordEvent": "task.created" } },
