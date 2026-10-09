@@ -98,6 +98,15 @@ CI (`.github/workflows/ci.yml`) typechecks, runs the cases and builds. Add an `A
 npm run deploy   # mastra deploy to Mastra platform
 ```
 
+**Keep data across deploys.** By default the app stores chats, sessions, proposals and accepted values in a local `mastra.db` file, which each deploy starts empty. To keep them, create a hosted LibSQL database at [turso.tech](https://turso.tech), then set two environment variables on the Mastra platform project and redeploy:
+
+| Variable | Value |
+|---|---|
+| `MASTRA_DB_URL` | The database URL, `libsql://<name>-<org>.turso.io` |
+| `MASTRA_DB_AUTH_TOKEN` | A token for that database (`turso db tokens create <name>`) |
+
+The app creates its tables on first start. To return to the sample data, empty the database's `poc_*` tables or point at a new database.
+
 Deploy reads the target project from `.mastra-project.json`. If the first deploy writes one, commit it so later deploys target the same project. The Mastra Factory server that works issues on this repo lives in its own repo ([mastra-factory](https://github.com/shalingosalia-bit/mastra-factory)). `.claude/skills/mastra-factory` lets Claude Code inspect and operate it through `mastra api factory`.
 
 ## Not in the sandbox

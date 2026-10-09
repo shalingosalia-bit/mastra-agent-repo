@@ -11,6 +11,12 @@ import { dealReviewWorkflow } from "./workflows/deal-review";
 export const mastra = new Mastra({
   agents: { dealReviewSupervisor, screeningAgent, comparisonAgent, taskAgent, memoAgent },
   workflows: { dealReviewWorkflow },
-  storage: new LibSQLStore({ id: "deal-review", url: process.env.MASTRA_DB_URL ?? "file:./mastra.db" }),
+  // One database for Mastra's threads and memory and the POC's records. A local
+  // file by default; a hosted LibSQL (Turso) URL and token keep both across deploys.
+  storage: new LibSQLStore({
+    id: "deal-review",
+    url: process.env.MASTRA_DB_URL ?? "file:./mastra.db",
+    authToken: process.env.MASTRA_DB_AUTH_TOKEN || undefined,
+  }),
   server: { apiRoutes: pocRoutes },
 });

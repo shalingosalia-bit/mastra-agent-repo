@@ -48,7 +48,10 @@ let ready: Promise<Client> | undefined;
 
 export function db(): Promise<Client> {
   ready ??= (async () => {
-    client = createClient({ url: process.env.MASTRA_DB_URL ?? "file:./mastra.db" });
+    client = createClient({
+      url: process.env.MASTRA_DB_URL ?? "file:./mastra.db",
+      authToken: process.env.MASTRA_DB_AUTH_TOKEN || undefined,
+    });
     for (const sql of SCHEMA) await client.execute(sql);
     // Accepted field values outlive a restart.
     for (const r of (await client.execute(`SELECT deal_id, field_key, value FROM poc_field_values`)).rows) {
