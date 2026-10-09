@@ -65,6 +65,16 @@ npm run evals    # only the model cases
 
 CI (`.github/workflows/ci.yml`) typechecks, runs the cases and builds. Add an `ANTHROPIC_API_KEY` repository secret to run the model cases there too.
 
+[`evals/golden/`](evals/golden/README.md) holds the golden set: prompts per agent with the result each must give, for manual runs in Studio.
+
+## Deploy
+
+```sh
+npm run deploy   # mastra deploy to Mastra platform
+```
+
+Deploy reads the target project from `.mastra-project.json`. If the first deploy writes one, commit it so later deploys target the same project. The Mastra Factory server that works issues on this repo lives in its own repo ([mastra-factory](https://github.com/shalingosalia-bit/mastra-factory)). `.claude/skills/mastra-factory` lets Claude Code inspect and operate it through `mastra api factory`.
+
 ## Not in the sandbox
 
 - **Claude through Bedrock.** Set `MASTRA_MODEL` and the `MASTRA_PRICE_*` variables once the provider is approved.
