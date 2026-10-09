@@ -7,11 +7,10 @@ import { listProposals } from "../src/mastra/foundation/proposals";
 import { resetStore, rows } from "../src/mastra/foundation/store";
 import { listSessionSourcesTool, proposeMemoTool, proposeTaskTool } from "../src/mastra/tools/proposal-tools";
 import { dealReviewWorkflow, readNextSteps } from "../src/mastra/workflows/deal-review";
-import { compsComparisonWorkflow, followUpTasksWorkflow } from "../src/mastra/workflows/standalone";
 
-// The deal-review workflow and the standalone ones, with stubs in place of the
-// model. The task and memo stubs call the real proposal tools, so the guard,
-// the dedupe and the memo's source check all run as they do live.
+// The deal-review workflow past screening, with stubs in place of the model.
+// The task and memo stubs call the real proposal tools, so the guard, the dedupe
+// and the memo's source check all run as they do live.
 
 const toolCtx = (requestContext: RequestContext, agentId: string) =>
   ({ requestContext, agent: { agentId, threadId: "unused" } }) as any;
@@ -56,7 +55,7 @@ const memoAgent = stub("memo", async (prompt, { requestContext }) => {
 function mastra() {
   return new Mastra({
     agents: { screeningAgent, taskAgent, memoAgent },
-    workflows: { dealReviewWorkflow, compsComparisonWorkflow, followUpTasksWorkflow },
+    workflows: { dealReviewWorkflow },
     storage: new LibSQLStore({ id: "wf-review-test", url: ":memory:" }),
     logger: false,
   });
@@ -131,31 +130,5 @@ describe("reading what's next", () => {
     ["stop", { tasks: false, comps: false, memo: false }],
   ])("%s", (reply, expected) => {
     expect(readNextSteps(reply)).toMatchObject(expected);
-  });
-});
-
-describe("standalone workflows", () => {
-  it("comps-comparison flags price per unit for Riverside Flats", async () => {
-    const run = await mastra().getWorkflow("compsComparisonWorkflow").createRun();
-    const done: any = await run.start({ inputData: { deal: "Riverside Flats" }, requestContext: rc() });
-    expect(done.result.rows.map((r: any) => r.flag)).toEqual([null, null, "above range"]);
-  });
-
-  it("comps-comparison refuses to compare Lamar Station's two comps", async () => {
-    const run = await mastra().getWorkflow("compsComparisonWorkflow").createRun();
-    const done: any = await run.start({ inputData: { deal: "Lamar Station" }, requestContext: rc() });
-    expect(done.result.rows.every((r: any) => !r.compared)).toBe(true);
-    expect(done.result.note).toMatch(/fewer than three comps/);
-  });
-
-  it("follow-up-tasks returns the proposals the task specialist made", async () => {
-    const run = await mastra().getWorkflow("followUpTasksWorkflow").createRun();
-    const done: any = await run.start({
-      inputData: { request: "Riverside Flats.\n| cap rate at least 5.5% | Going-in Cap Rate | 5.4 | Fail |" },
-      requestContext: rc(),
-    });
-    expect(done.result.tasks).toHaveLength(1);
-    expect(done.result.tasks[0]).toMatchObject({ assignee: "Raj Patel", status: "pending" });
-    expect(done.result.next).toMatch(/review panel/);
   });
 });

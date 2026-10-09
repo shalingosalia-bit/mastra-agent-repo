@@ -2,7 +2,7 @@ import type { RequestContext } from "@mastra/core/request-context";
 import { createStep, createWorkflow } from "@mastra/core/workflows";
 import { z } from "zod";
 import { listProposals } from "../foundation/proposals";
-import { checkCriteria, confirmMapping, resolveCriteria, screeningResult, verdictRows } from "./deal-screening";
+import { checkCriteria, confirmMapping, resolveCriteria, screeningResult, verdictRows } from "./screening-steps";
 import { compare, comparisonResult, inSession, REVIEW_PANEL, taskProposal, taskProposals } from "./shared";
 
 // The whole deal review as one workflow (brief §Agent Workflow, steps 1 to 10):

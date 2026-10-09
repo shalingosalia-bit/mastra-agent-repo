@@ -26,18 +26,16 @@ Then open the **review panel** at http://localhost:4111/poc/review:
 
 The DealLead accepts proposals only in the panel. The supervisor can't accept, save or submit anything.
 
-### Workflows
+### The deal-review workflow
 
-The same review is also in **Workflows**, where the pauses for the DealLead are enforced by the engine rather than the supervisor's instructions (`workflows/`). Every input and reply is a sentence in your own words. Each run is its own session, at `/poc/sessions/<runId>`.
+**Workflows → deal-review** runs the standard review as a fixed sequence, with each pause for the DealLead enforced by the engine rather than the supervisor's instructions (`workflows/deal-review.ts`, built from `workflows/screening-steps.ts`). Every input and reply is a sentence in your own words, and the run is its own session, at `/poc/sessions/<runId>`.
 
-| Workflow | Run with | Then |
-|---|---|---|
-| **deal-review**, the whole review | `Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking price under $60M.` | It pauses with the mapping: reply `Looks good, go ahead.` or correct it (`Price means purchase price.`). It checks, then pauses with the verdict: reply with what's next, e.g. `Chase the open criteria and compare with comps.` or `All of it. My decision: pursue to LOI.` or `Stop.` |
-| **deal-screening**, screening only | The same request | One pause, for the mapping |
-| **comps-comparison** | `Riverside Flats` | Nothing: it returns the comparison |
-| **follow-up-tasks** | `Riverside Flats: cap rate at least 5.5% failed at 5.4, and asking price under $60M is unknown.` | Nothing: it returns the proposed tasks |
+1. **Run** with a request, e.g. `Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking price under $60M.`
+2. It pauses with the mapping. Reply `Looks good, go ahead.`, correct it (`Price means purchase price.`) or `Stop.` Nothing is checked until you reply.
+3. It checks, then pauses with the verdict. Reply with what's next, e.g. `Chase the open criteria and compare with comps.`, `All of it. My decision: pursue to LOI.` or `Stop.`
+4. It runs only what you asked for, in the order tasks, comps, memo, and ends with a summary of what waits for you in the review panel.
 
-A field the model names that doesn't exist, or that the User can't read, becomes a question instead of a mapping. Which next steps deal-review runs is read from your reply in code, not by a model, so it never runs a step you didn't ask for. Tasks and the memo are proposals: accept them in the review panel. There is no standalone memo workflow, because a memo may quote only what its own run sourced.
+A field the model names that doesn't exist, or that the User can't read, becomes a question instead of a mapping. Which next steps run is read from your reply in code, not by a model, so the workflow never runs a step you didn't ask for. To run one specialist on its own, ask the supervisor (`Just compare Riverside with comps.`) or chat with that specialist in **Agents**.
 
 ### What each agent can do
 

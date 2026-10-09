@@ -1,16 +1,16 @@
 import type { RequestContext } from "@mastra/core/request-context";
-import { createStep, createWorkflow } from "@mastra/core/workflows";
+import { createStep } from "@mastra/core/workflows";
 import { z } from "zod";
 import { findDeal, visibleFields } from "../data/fixtures";
 import { roleFrom } from "../tools/context";
 import { checkCriteriaTool } from "../tools/screening-tools";
 import { inSession } from "./shared";
 
-// Screening as a workflow (deal screening 05 §Screening Flow, step 4): the run
-// suspends durably after RESOLVE, and CHECK runs only once the DealLead replies.
-// The supervisor's chat path asks for the same confirmation in its instructions;
-// here the pause is enforced by the engine, not the model. The DealLead writes
-// the request and the reply in their own words.
+// The screening steps of the deal-review workflow (deal screening 05 §Screening
+// Flow, steps 2 to 4): the run suspends durably after RESOLVE, and CHECK runs
+// only once the DealLead replies. The supervisor's chat path asks for the same
+// confirmation in its instructions; here the pause is enforced by the engine, not
+// the model. The DealLead writes the request and the reply in their own words.
 
 const operator = z.enum([">=", "<=", ">", "<", "=", "in", "between"]);
 const target = z.union([z.number(), z.string(), z.array(z.union([z.number(), z.string()]))]);
@@ -178,14 +178,3 @@ export const checkCriteria = createStep({
     return { dealId: inputData.dealId, deal: r.deal, rows: r.rows, unresolved: inputData.unresolved, note };
   },
 });
-
-export const dealScreeningWorkflow = createWorkflow({
-  id: "deal-screening",
-  description: "Screen one deal against the DealLead's criteria: map them to fields, wait for the DealLead's reply, then check.",
-  inputSchema: resolveCriteria.inputSchema,
-  outputSchema: checkCriteria.outputSchema,
-})
-  .then(resolveCriteria)
-  .then(confirmMapping)
-  .then(checkCriteria)
-  .commit();

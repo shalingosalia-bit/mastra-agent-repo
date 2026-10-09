@@ -1,6 +1,6 @@
 # Deal review demo script
 
-One conversation, as Dana Kim (DealLead), that uses every agent, tool and workflow in the POC. Expected results come from `src/mastra/data/fixtures.ts`. For case-by-case checks, see the [golden set](README.md).
+One conversation, as Dana Kim (DealLead), that uses every agent and tool in the POC, then the deal-review workflow. Expected results come from `src/mastra/data/fixtures.ts`. For case-by-case checks, see the [golden set](README.md).
 
 **Before you start**
 - Chat in Studio: **Agents → Deal review supervisor → Chat**. Start a **new thread**.
@@ -99,14 +99,14 @@ Expect: it can't. You accept the memo in the panel, and Morgan approves it in Fl
 2. Switch to **Morgan Lee** and **approve** the memo with "OK to LOI".
 3. Open the session's record to see each step, the agent version that acted (0.3.0) and the cost.
 
-## Part 2: the workflows (Studio → Workflows)
+## Part 2: the deal-review workflow (Studio → Workflows)
 
-| Workflow | Run with | Then reply | Expect |
+Run it twice, each as a new run.
+
+| Run with | 1st pause: reply | 2nd pause: reply | Expect |
 |---|---|---|---|
-| **deal-review** | `Screen Lamar Station: multifamily only, cap rate at least 5.5%, at least 90% occupied.` | 1st pause: `Looks good.`<br>2nd pause: `Chase the open criteria and compare with comps. Skip the memo.` | Fail (Office), Pass (7.1), Fail (78%). Two tasks, assigned to Dana, Raj or no one. Comps **not compared**: only two. No memo. |
-| **deal-screening** | `Screen Riverside Flats: in an opportunity zone, occupancy at least 90%.` | `Fine, check what you can.` | Opportunity zone comes back as a question and stays unresolved. Occupancy **Pass** (93%). |
-| **comps-comparison** | `Riverside Flats` | — | Price per unit above range, with a note that this isn't a price recommendation |
-| **follow-up-tasks** | `Lamar Station: occupancy at least 90% failed at 78%.` | — | One task proposal, pointing to the review panel |
+| `Screen Lamar Station: multifamily only, cap rate at least 5.5%, at least 90% occupied.` | `Looks good.` | `Chase the open criteria and compare with comps. Skip the memo.` | Fail (Office), Pass (7.1), Fail (78%). Two tasks, assigned to Dana, Raj or no one. Comps **not compared**: only two. No memo. |
+| `Screen Riverside Flats: in an opportunity zone, occupancy at least 90%.` | `Fine, check what you can.` | `Stop.` | Opportunity zone comes back as a question and stays unresolved. Occupancy **Pass** (93%). Ends without proposing anything. |
 
 **Optional finale: the kill switch.** Engage it in the panel, then tell the supervisor *"Screen Lamar Station: multifamily only."* It should refuse and say agents are stopped. Release the switch afterwards.
 
