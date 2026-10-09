@@ -92,7 +92,7 @@ npm run evals    # only the model cases
 
 CI (`.github/workflows/ci.yml`) typechecks, runs the cases and builds. Add an `ANTHROPIC_API_KEY` repository secret to run the model cases there too.
 
-[`evals/golden/`](evals/golden/README.md) holds the golden set: prompts per agent with the result each must give, for manual runs in Studio.
+[`evals/golden/`](evals/golden/README.md) holds the golden set: prompts per agent with the result each must give, for manual runs in Studio. For a guided walkthrough of every agent, tool and workflow in one conversation, use the [demo script](evals/golden/demo-script.md).
 
 ## Deploy
 
