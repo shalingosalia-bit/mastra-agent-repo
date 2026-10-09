@@ -72,10 +72,16 @@ async function act(fn) {
 }
 
 function proposalCard(p) {
-  const body = p.kind === "task"
-    ? \`<div><b>\${esc(p.payload.title)}</b></div><div class="muted">From: \${esc(p.payload.criterion)} · Assignee: \${esc(p.payload.assignee?.name ?? "none")} · Due \${esc(p.payload.dueDate)}</div>\`
-    : \`<div><b>\${esc(p.payload.title)}</b></div><pre>\${esc(p.payload.body)}</pre>\`;
-  return \`<div class="card"><div class="row"><span><span class="tag">\${p.kind}</span> \${esc(p.id)} · \${esc(p.dealId)}</span>
+  const x = p.payload;
+  const bodies = {
+    task: () => \`<div><b>\${esc(x.title)}</b></div><div class="muted">From: \${esc(x.criterion)} · Assignee: \${esc(x.assignee?.name ?? "none")} · Due \${esc(x.dueDate)}</div>\`,
+    memo: () => \`<div><b>\${esc(x.title)}</b></div><pre>\${esc(x.body)}</pre>\`,
+    field_value: () => \`<div><b>\${esc(x.fieldLabel)}: \${esc(x.previous ?? "empty")} → \${esc(x.value)}</b></div><div class="muted">Source: \${esc(x.source)}</div>\`,
+    task_change: () => \`<div><b>\${esc(x.title)}</b></div><div class="muted">\${x.assignee !== undefined ? "Assignee → " + esc(x.assignee?.name ?? "none") + " · " : ""}\${x.dueDate ? "Due → " + esc(x.dueDate) + " · " : ""}\${esc(x.reason)}</div>\`,
+    note: () => \`<div><b>Note on the deal</b></div><pre>\${esc(x.note)}</pre>\`,
+  };
+  const body = (bodies[p.kind] || bodies.memo)();
+  return \`<div class="card"><div class="row"><span><span class="tag">\${esc(p.kind.replace("_", " "))}</span> \${esc(p.id)} · \${esc(p.dealId)}</span>
     <span class="muted">\${esc(p.agentId)} v\${esc(p.agentVersion)}</span></div>\${body}
     <div class="bar"><button class="primary" onclick="act(() => api('/poc/proposals/\${p.id}/accept', { method: 'POST' }))">Accept</button>
     <button class="danger" onclick="act(() => api('/poc/proposals/\${p.id}/reject', { method: 'POST', body: JSON.stringify({ reason: prompt('Why reject?') || null }) }))">Reject</button></div></div>\`;

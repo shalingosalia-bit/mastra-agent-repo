@@ -4,22 +4,29 @@ import { z } from "zod";
 import { findDeal, visibleFields } from "../data/fixtures";
 import { roleFrom } from "../tools/context";
 import { checkCriteriaTool } from "../tools/screening-tools";
+import { inSession } from "./shared";
 
 // Screening as a workflow (deal screening 05 §Screening Flow, step 4): the run
-// suspends durably after RESOLVE, and CHECK runs only on a mapping the DealLead
-// resumed with. The supervisor's chat path asks for the same confirmation in
-// its instructions; here the pause is enforced by the engine, not the model.
+// suspends durably after RESOLVE, and CHECK runs only once the DealLead replies.
+// The supervisor's chat path asks for the same confirmation in its instructions;
+// here the pause is enforced by the engine, not the model. The DealLead writes
+// the request and the reply in their own words.
 
 const operator = z.enum([">=", "<=", ">", "<", "=", "in", "between"]);
 const target = z.union([z.number(), z.string(), z.array(z.union([z.number(), z.string()]))]);
 
 const mappedCriterion = z.object({
-  criterion: z.string(),
+  criterion: z.string().describe("The criterion in the DealLead's words"),
   fieldKey: z.string().nullable().describe("The Tenant field key, or null when no field fits"),
   fieldLabel: z.string().nullable(),
   operator: operator.nullable(),
   target: target.nullable(),
   question: z.string().nullable().describe("What to ask the DealLead when no field fits, else null"),
+});
+
+const resolved = z.object({
+  deal: z.string().describe("The deal id or name the DealLead named"),
+  criteria: z.array(mappedCriterion),
 });
 
 const mapping = z.object({
@@ -34,42 +41,50 @@ const confirmedCriterion = z.object({
   test: z.object({ operator, target }),
 });
 
-// The run's session is the workflow run, so its tool calls and sourced values
-// land on /poc/sessions/<runId>, as a supervisor thread's do.
-function inSession(rc: RequestContext, runId: string) {
-  if (typeof rc.get("sessionId") !== "string") rc.set("sessionId", runId);
-  return rc;
+const interpretation = z.object({
+  proceed: z.boolean().describe("true if the DealLead wants the criteria checked now, false if they want to stop"),
+  corrections: z.array(confirmedCriterion).describe("Criteria the DealLead remapped or newly mapped, by criterion text; empty if none"),
+});
+
+function readableFields(rc: RequestContext) {
+  return new Map(visibleFields(roleFrom({ requestContext: rc })).map((f) => [f.key, f.label]));
 }
 
-const resolveCriteria = createStep({
+function describe(m: z.infer<typeof mapping>) {
+  const lines = m.criteria.map((c) =>
+    c.fieldKey ? `- ${c.criterion} → ${c.fieldLabel} ${c.operator} ${JSON.stringify(c.target)}` : `- ${c.criterion} → no field. ${c.question}`);
+  return `Here's how I read your criteria for ${m.dealName}:\n${lines.join("\n")}\n\n` +
+    "Reply to confirm (\"looks good, go ahead\"), correct any of them (\"price means purchase price\"), or stop. Nothing is checked until you reply.";
+}
+
+export const resolveCriteria = createStep({
   id: "resolve-criteria",
-  description: "The screening specialist maps each criterion to one of the Tenant's deal fields and a test. Reads no values.",
+  description: "The screening specialist reads the DealLead's request and maps each criterion to one of the Tenant's deal fields and a test. Reads no values.",
   inputSchema: z.object({
-    deal: z.string().describe("Deal id or name, e.g. Riverside Flats"),
-    criteria: z.array(z.string()).min(1).describe("Each criterion as the DealLead states it"),
+    request: z.string().describe("Your screening request, e.g. Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking price under $60M"),
   }),
   outputSchema: mapping,
   execute: async ({ inputData, mastra, requestContext, runId }) => {
-    const deal = findDeal(inputData.deal);
-    if (!deal) throw new Error(`No deal matches "${inputData.deal}".`);
-
     const rc = inSession(requestContext as RequestContext, runId);
     const out = await mastra.getAgent("screeningAgent").generate(
-      `RESOLVE. Deal: ${deal.name} (${deal.id}). Criteria, word for word:\n${inputData.criteria.map((c) => `- ${c}`).join("\n")}\n` +
-        "Return every criterion. Where no field fits, set fieldKey, operator and target to null and write the question to ask.",
-      { requestContext: rc, structuredOutput: { schema: mapping } },
+      `RESOLVE. The DealLead's request, word for word:\n"""\n${inputData.request}\n"""\n` +
+        "Identify the deal they named and list every criterion they stated, in their words. " +
+        "Where no field fits a criterion, set fieldKey, operator and target to null and write the question to ask.",
+      { requestContext: rc, structuredOutput: { schema: resolved } },
     );
+
+    const deal = findDeal(out.object.deal);
+    if (!deal) throw new Error(`No deal matches "${out.object.deal}". Start a new run naming the deal.`);
 
     // A field the model names must exist and be readable by this User; anything
     // else becomes a question, never a guess (eval case 1).
-    const readable = new Map(visibleFields(roleFrom({ requestContext: rc })).map((f) => [f.key, f.label]));
-    const criteria = inputData.criteria.map((criterion) => {
-      const m = out.object.criteria.find((c) => c.criterion === criterion);
-      const label = m?.fieldKey ? readable.get(m.fieldKey) : undefined;
-      if (!m || !m.fieldKey || !label || !m.operator || m.target === null) {
+    const readable = readableFields(rc);
+    const criteria = out.object.criteria.map((m) => {
+      const label = m.fieldKey ? readable.get(m.fieldKey) : undefined;
+      if (!m.fieldKey || !label || !m.operator || m.target === null) {
         return {
-          criterion, fieldKey: null, fieldLabel: null, operator: null, target: null,
-          question: m?.question ?? `No deal field fits "${criterion}". Which field do you mean?`,
+          criterion: m.criterion, fieldKey: null, fieldLabel: null, operator: null, target: null,
+          question: m.question ?? `No deal field fits "${m.criterion}". Which field do you mean?`,
         };
       }
       return { ...m, fieldLabel: label, question: null };
@@ -78,28 +93,37 @@ const resolveCriteria = createStep({
   },
 });
 
-const confirmMapping = createStep({
+export const confirmMapping = createStep({
   id: "confirm-mapping",
-  description: "Waits for the DealLead to confirm or correct the mapping. Nothing is checked until they resume.",
+  description: "Shows the mapping and waits for the DealLead's reply. Nothing is checked until they reply.",
   inputSchema: mapping,
-  suspendSchema: mapping,
+  suspendSchema: mapping.extend({ message: z.string() }),
   resumeSchema: z.object({
-    confirmed: z.boolean().describe("true to check the mapping (with any corrections), false to stop"),
-    corrections: z.array(confirmedCriterion).optional()
-      .describe("Criteria to remap, or to map where no field fit, matched by criterion text"),
+    reply: z.string().describe("Your reply, e.g. looks good, go ahead / price means purchase price / stop"),
   }),
   outputSchema: z.object({
     dealId: z.string(),
     confirmed: z.array(confirmedCriterion),
     unresolved: z.array(z.string()),
+    stopped: z.boolean(),
   }),
-  execute: async ({ inputData, resumeData, suspend, bail }) => {
-    if (!resumeData) return await suspend(inputData);
-    if (!resumeData.confirmed) {
-      return bail({ dealId: inputData.dealId, confirmed: [], unresolved: inputData.criteria.map((c) => c.criterion) });
+  execute: async ({ inputData, resumeData, suspend, mastra, requestContext, runId }) => {
+    if (!resumeData) return await suspend({ ...inputData, message: describe(inputData) });
+
+    const rc = inSession(requestContext as RequestContext, runId);
+    const out = await mastra.getAgent("screeningAgent").generate(
+      `INTERPRET. You showed the DealLead this mapping for ${inputData.dealName}:\n${JSON.stringify(inputData.criteria, null, 2)}\n\n` +
+        `They replied, word for word:\n"""\n${resumeData.reply}\n"""\n` +
+        "Do they want the criteria checked now, or to stop? List any criterion they remapped or newly mapped, using the criterion text exactly as shown above. " +
+        "Call describe-deal-fields if you need a field key. Check nothing in this mode.",
+      { requestContext: rc, structuredOutput: { schema: interpretation } },
+    );
+    if (!out.object.proceed) {
+      return { dealId: inputData.dealId, confirmed: [], unresolved: inputData.criteria.map((c) => c.criterion), stopped: true };
     }
 
-    const corrections = new Map((resumeData.corrections ?? []).map((c) => [c.criterion, c]));
+    const readable = readableFields(rc);
+    const corrections = new Map(out.object.corrections.filter((c) => readable.has(c.fieldKey)).map((c) => [c.criterion, c]));
     const confirmed: z.infer<typeof confirmedCriterion>[] = [];
     const unresolved: string[] = [];
     for (const c of inputData.criteria) {
@@ -109,31 +133,39 @@ const confirmMapping = createStep({
         confirmed.push({ criterion: c.criterion, fieldKey: c.fieldKey, test: { operator: c.operator, target: c.target } });
       } else unresolved.push(c.criterion);
     }
-    return { dealId: inputData.dealId, confirmed, unresolved };
+    return { dealId: inputData.dealId, confirmed, unresolved, stopped: false };
   },
 });
 
-const checkCriteria = createStep({
+export const verdictRows = z.array(z.object({
+  criterion: z.string(),
+  field: z.string(),
+  value: z.union([z.string(), z.number()]).nullable(),
+  verdict: z.enum(["pass", "fail", "unknown"]),
+  source: z.string().nullable(),
+  note: z.string().optional(),
+}));
+
+export const screeningResult = z.object({
+  dealId: z.string(),
+  deal: z.string(),
+  rows: verdictRows,
+  unresolved: z.array(z.string()),
+  note: z.string(),
+});
+
+export const checkCriteria = createStep({
   id: "check-criteria",
   description: "Checks only the confirmed criteria. The tool reads each value and decides the verdict.",
   inputSchema: confirmMapping.outputSchema,
-  outputSchema: z.object({
-    deal: z.string(),
-    rows: z.array(z.object({
-      criterion: z.string(),
-      field: z.string(),
-      value: z.union([z.string(), z.number()]).nullable(),
-      verdict: z.enum(["pass", "fail", "unknown"]),
-      source: z.string().nullable(),
-      note: z.string().optional(),
-    })),
-    unresolved: z.array(z.string()),
-    note: z.string(),
-  }),
+  outputSchema: screeningResult,
   execute: async ({ inputData, requestContext, runId }) => {
+    if (inputData.stopped) {
+      return { dealId: inputData.dealId, deal: inputData.dealId, rows: [], unresolved: inputData.unresolved, note: "Stopped at your request. Nothing was checked." };
+    }
     const note = "This is not a recommendation, and nothing on the deal has changed.";
     if (!inputData.confirmed.length) {
-      return { deal: inputData.dealId, rows: [], unresolved: inputData.unresolved, note };
+      return { dealId: inputData.dealId, deal: inputData.dealId, rows: [], unresolved: inputData.unresolved, note };
     }
     // Called as the screening specialist, so the guard applies its grants and
     // the session records its version.
@@ -142,15 +174,14 @@ const checkCriteria = createStep({
       { dealId: inputData.dealId, criteria: inputData.confirmed },
       { requestContext: rc, agent: { agentId: "screening", threadId: runId } } as any,
     );
-    if (r.refused) throw new Error(r.message);
-    if (!r.found) throw new Error(r.message);
-    return { deal: r.deal, rows: r.rows, unresolved: inputData.unresolved, note };
+    if (r.refused || !r.found) throw new Error(r.message);
+    return { dealId: inputData.dealId, deal: r.deal, rows: r.rows, unresolved: inputData.unresolved, note };
   },
 });
 
 export const dealScreeningWorkflow = createWorkflow({
   id: "deal-screening",
-  description: "Screen one deal against the DealLead's criteria: map them to fields, wait for the DealLead to confirm, then check.",
+  description: "Screen one deal against the DealLead's criteria: map them to fields, wait for the DealLead's reply, then check.",
   inputSchema: resolveCriteria.inputSchema,
   outputSchema: checkCriteria.outputSchema,
 })

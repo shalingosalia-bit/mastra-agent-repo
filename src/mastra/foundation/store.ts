@@ -1,4 +1,5 @@
 import { createClient, type Client, type InValue } from "@libsql/client";
+import { restoreFixtures, setFieldValue } from "../data/fixtures";
 
 // The foundation's durable records: sessions and their activity, proposals and
 // what accepting them produced, Flow approvals, the deal record, kill switches
@@ -37,6 +38,9 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS poc_sources (
     session_id TEXT NOT NULL, source TEXT NOT NULL, label TEXT NOT NULL, value TEXT NOT NULL,
     PRIMARY KEY (session_id, source))`,
+  `CREATE TABLE IF NOT EXISTS poc_field_values (
+    deal_id TEXT NOT NULL, field_key TEXT NOT NULL, value TEXT NOT NULL, proposal_id TEXT NOT NULL,
+    set_by TEXT NOT NULL, set_at TEXT NOT NULL, PRIMARY KEY (deal_id, field_key))`,
 ];
 
 let client: Client | undefined;
@@ -46,6 +50,10 @@ export function db(): Promise<Client> {
   ready ??= (async () => {
     client = createClient({ url: process.env.MASTRA_DB_URL ?? "file:./mastra.db" });
     for (const sql of SCHEMA) await client.execute(sql);
+    // Accepted field values outlive a restart.
+    for (const r of (await client.execute(`SELECT deal_id, field_key, value FROM poc_field_values`)).rows) {
+      setFieldValue(String(r.deal_id), String(r.field_key), JSON.parse(String(r.value)));
+    }
     return client;
   })();
   return ready;
@@ -75,7 +83,8 @@ export function newId(prefix: string): string {
 // For tests: start from an empty database.
 export async function resetStore() {
   const c = await db();
-  for (const t of ["sessions", "activities", "proposals", "work_items", "files", "approvals", "deal_record", "kill_switches", "sources"]) {
+  for (const t of ["sessions", "activities", "proposals", "work_items", "files", "approvals", "deal_record", "kill_switches", "sources", "field_values"]) {
     await c.execute(`DELETE FROM poc_${t}`);
   }
+  restoreFixtures();
 }

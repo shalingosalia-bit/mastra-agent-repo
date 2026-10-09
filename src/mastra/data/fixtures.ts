@@ -158,3 +158,29 @@ export function readValue(deal: Deal, key: string, role: Role): FieldValue {
   if (!def || !canSee(def, role)) return null;
   return deal.fields[key] ?? null;
 }
+
+// ---- Accepted field values. Only a DealLead's acceptance of a proposal sets one
+// (foundation/proposals.ts); the store re-applies them at start-up. ----
+
+const originalFields = new Map(deals.map((d) => [d.id, { ...d.fields }]));
+
+export function setFieldValue(dealId: string, key: string, value: FieldValue) {
+  const deal = deals.find((d) => d.id === dealId);
+  if (deal) deal.fields[key] = value;
+}
+
+// For tests: the fixtures as shipped.
+export function restoreFixtures() {
+  for (const d of deals) d.fields = { ...originalFields.get(d.id)! };
+}
+
+// A value as the field's type expects it, or why it can't be.
+export function coerceValue(field: FieldDef, raw: string | number): { ok: true; value: string | number } | { ok: false; message: string } {
+  if (field.type === "option") {
+    const option = field.options?.find((o) => o.toLowerCase() === String(raw).trim().toLowerCase());
+    return option ? { ok: true, value: option } : { ok: false, message: `${field.label} must be one of: ${field.options?.join(", ")}.` };
+  }
+  if (field.type === "text") return { ok: true, value: String(raw).trim() };
+  const n = typeof raw === "number" ? raw : Number(String(raw).replace(/[$,%\s]/g, ""));
+  return Number.isFinite(n) ? { ok: true, value: n } : { ok: false, message: `${field.label} needs a number, not "${raw}".` };
+}

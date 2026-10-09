@@ -6,11 +6,13 @@ import { screeningAgent } from "./agents/screening";
 import { dealReviewSupervisor } from "./agents/supervisor";
 import { taskAgent } from "./agents/task";
 import { pocRoutes } from "./foundation/routes";
+import { dealReviewWorkflow } from "./workflows/deal-review";
 import { dealScreeningWorkflow } from "./workflows/deal-screening";
+import { compsComparisonWorkflow, followUpTasksWorkflow } from "./workflows/standalone";
 
 export const mastra = new Mastra({
   agents: { dealReviewSupervisor, screeningAgent, comparisonAgent, taskAgent, memoAgent },
-  workflows: { dealScreeningWorkflow },
+  workflows: { dealReviewWorkflow, dealScreeningWorkflow, compsComparisonWorkflow, followUpTasksWorkflow },
   storage: new LibSQLStore({ id: "deal-review", url: process.env.MASTRA_DB_URL ?? "file:./mastra.db" }),
   server: { apiRoutes: pocRoutes },
 });

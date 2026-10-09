@@ -13,21 +13,21 @@ import { dealScreeningWorkflow } from "../src/mastra/workflows/deal-screening";
 // specialist so these run without a model.
 
 type Mapped = { criterion: string; fieldKey: string | null; operator: string | null; target: unknown; question?: string | null };
+type Reply = { proceed: boolean; corrections?: { criterion: string; fieldKey: string; test: { operator: string; target: unknown } }[] };
 
-function stubScreening(mapped: Mapped[]) {
+// Answers RESOLVE with the given mapping and INTERPRET with the given reading of
+// the DealLead's reply, as the screening specialist's structured output would.
+function stubScreening(mapped: Mapped[], reply: Reply, deal = "Riverside Flats") {
   const agent = new Agent({ id: "screening", name: "Screening stub", instructions: "stub", model: "anthropic/claude-sonnet-5-5" });
-  (agent as any).generate = async () => ({
-    object: {
-      dealId: "D-1001", dealName: "Riverside Flats",
-      criteria: mapped.map((m) => ({ fieldLabel: null, question: null, ...m })),
-    },
-  });
+  (agent as any).generate = async (prompt: string) => prompt.startsWith("INTERPRET")
+    ? { object: { corrections: [], ...reply } }
+    : { object: { deal, criteria: mapped.map((m) => ({ fieldLabel: null, question: null, ...m })) } };
   return agent;
 }
 
-function setup(mapped: Mapped[]) {
+function setup(mapped: Mapped[], reply: Reply = { proceed: true }, deal?: string) {
   const mastra = new Mastra({
-    agents: { screeningAgent: stubScreening(mapped) },
+    agents: { screeningAgent: stubScreening(mapped, reply, deal) },
     workflows: { dealScreeningWorkflow },
     storage: new LibSQLStore({ id: "wf-test", url: ":memory:" }),
     logger: false,
@@ -49,7 +49,7 @@ const riverside = [
   { criterion: "Asking price under $60M", fieldKey: "asking_price", operator: "<", target: 60_000_000 },
   { criterion: "Seller reserve under $57M", fieldKey: "seller_reserve", operator: "<", target: 57_000_000 },
 ];
-const input = { deal: "Riverside Flats", criteria: riverside.map((c) => c.criterion) };
+const input = { request: "Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking under 60M, seller reserve under 57M." };
 
 async function checks(sessionId: string) {
   const rec = await sessionRecord(sessionId);
@@ -61,16 +61,17 @@ beforeEach(async () => {
 });
 
 describe("deal-screening workflow", () => {
-  it("suspends after mapping and checks nothing until the DealLead resumes", async () => {
+  it("suspends after mapping and checks nothing until the DealLead replies", async () => {
     const run = await setup(riverside).createRun();
     const res: any = await run.start({ inputData: input, requestContext: rc() });
 
     expect(res.status).toBe("suspended");
     const shown = res.steps["confirm-mapping"].suspendPayload;
     expect(shown.criteria.map((c: any) => c.fieldLabel)).toEqual(["Property Type", "Going-in Cap Rate", "Asking Price", "Seller Reserve Price"]);
+    expect(shown.message).toMatch(/Nothing is checked until you reply/);
     expect(await checks(run.runId)).toHaveLength(0);
 
-    const done: any = await run.resume({ step: "confirm-mapping", resumeData: { confirmed: true }, requestContext: rc() });
+    const done: any = await run.resume({ step: "confirm-mapping", resumeData: { reply: "Looks good, go ahead." }, requestContext: rc() });
     expect(done.status).toBe("success");
     expect(done.result.rows.map((r: any) => [r.verdict, r.value])).toEqual([
       ["pass", "Multifamily"], ["fail", 5.4], ["unknown", null], ["pass", 56_000_000],
@@ -79,43 +80,55 @@ describe("deal-screening workflow", () => {
     expect(await checks(run.runId)).toHaveLength(1);
   });
 
-  it("stops without checking when the DealLead does not confirm", async () => {
-    const run = await setup(riverside).createRun();
+  it("stops without checking when the DealLead says stop", async () => {
+    const run = await setup(riverside, { proceed: false }).createRun();
     await run.start({ inputData: input, requestContext: rc() });
-    const done: any = await run.resume({ step: "confirm-mapping", resumeData: { confirmed: false }, requestContext: rc() });
-    expect(done.status).toBe("success");
+    const done: any = await run.resume({ step: "confirm-mapping", resumeData: { reply: "Actually, hold off." }, requestContext: rc() });
+    expect(done.result).toMatchObject({ rows: [], note: expect.stringMatching(/Nothing was checked/) });
     expect(await checks(run.runId)).toHaveLength(0);
   });
 
   it("applies the DealLead's corrections before checking", async () => {
-    const run = await setup([{ criterion: "Price under $60M", fieldKey: "asking_price", operator: "<", target: 60_000_000 }]).createRun();
-    await run.start({ inputData: { deal: "Riverside Flats", criteria: ["Price under $60M"] }, requestContext: rc() });
-    const done: any = await run.resume({
-      step: "confirm-mapping",
-      resumeData: { confirmed: true, corrections: [{ criterion: "Price under $60M", fieldKey: "purchase_price", test: { operator: "<", target: 60_000_000 } }] },
-      requestContext: rc(),
-    });
+    const fix = { criterion: "Price under $60M", fieldKey: "purchase_price", test: { operator: "<", target: 60_000_000 } };
+    const run = await setup([{ criterion: "Price under $60M", fieldKey: "asking_price", operator: "<", target: 60_000_000 }], { proceed: true, corrections: [fix] }).createRun();
+    await run.start({ inputData: { request: "Screen Riverside Flats, price under 60M." }, requestContext: rc() });
+    const done: any = await run.resume({ step: "confirm-mapping", resumeData: { reply: "Price means purchase price. Go ahead." }, requestContext: rc() });
     expect(done.result.rows[0]).toMatchObject({ field: "Purchase Price", value: 58_800_000, verdict: "pass" });
+  });
+
+  it("ignores a correction to a field that does not exist", async () => {
+    const bad = { criterion: "Cap rate at least 5.5%", fieldKey: "made_up_field", test: { operator: ">=", target: 5.5 } };
+    const run = await setup([riverside[1]], { proceed: true, corrections: [bad] }).createRun();
+    await run.start({ inputData: { request: "Screen Riverside Flats, cap rate at least 5.5%." }, requestContext: rc() });
+    const done: any = await run.resume({ step: "confirm-mapping", resumeData: { reply: "Use the made up field." }, requestContext: rc() });
+    expect(done.result.rows[0]).toMatchObject({ field: "Going-in Cap Rate", verdict: "fail" });
   });
 
   it("turns a field that does not exist into a question, never a guess", async () => {
     const run = await setup([
       { criterion: "In an opportunity zone", fieldKey: "opportunity_zone", operator: "=", target: "Yes" },
       { criterion: "Cap rate at least 5.5%", fieldKey: "cap_rate", operator: ">=", target: 5.5 },
-    ]).createRun();
-    const res: any = await run.start({ inputData: { deal: "D-1001", criteria: ["In an opportunity zone", "Cap rate at least 5.5%"] }, requestContext: rc() });
+    ], { proceed: true }, "D-1001").createRun();
+    const res: any = await run.start({ inputData: { request: "Screen D-1001: in an opportunity zone, cap rate at least 5.5%." }, requestContext: rc() });
     const shown = res.steps["confirm-mapping"].suspendPayload;
     expect(shown.criteria[0]).toMatchObject({ fieldKey: null, question: expect.stringMatching(/Which field/) });
 
-    const done: any = await run.resume({ step: "confirm-mapping", resumeData: { confirmed: true }, requestContext: rc() });
+    const done: any = await run.resume({ step: "confirm-mapping", resumeData: { reply: "Fine, check what you can." }, requestContext: rc() });
     expect(done.result.rows).toHaveLength(1);
     expect(done.result.unresolved).toEqual(["In an opportunity zone"]);
   });
 
   it("does not map an Analyst's criterion to a field they cannot read", async () => {
     const run = await setup([riverside[3]]).createRun();
-    const res: any = await run.start({ inputData: { deal: "Riverside Flats", criteria: [riverside[3].criterion] }, requestContext: rc("Analyst") });
+    const res: any = await run.start({ inputData: { request: "Screen Riverside Flats, seller reserve under 57M." }, requestContext: rc("Analyst") });
     expect(res.steps["confirm-mapping"].suspendPayload.criteria[0].fieldKey).toBeNull();
     expect(JSON.stringify(res)).not.toMatch(/56000000/);
+  });
+
+  it("fails clearly when the request names no known deal", async () => {
+    const run = await setup(riverside, { proceed: true }, "Maple Court").createRun();
+    const res: any = await run.start({ inputData: { request: "Screen Maple Court, multifamily only." }, requestContext: rc() });
+    expect(res.status).toBe("failed");
+    expect(JSON.stringify(res.error ?? res)).toMatch(/No deal matches/);
   });
 });

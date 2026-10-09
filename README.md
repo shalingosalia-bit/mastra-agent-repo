@@ -26,15 +26,32 @@ Then open the **review panel** at http://localhost:4111/poc/review:
 
 The DealLead accepts proposals only in the panel. The supervisor can't accept, save or submit anything.
 
-### Screening as a workflow
+### Workflows
 
-**Workflows → deal-screening** runs the screening step with the DealLead's confirmation enforced by the engine rather than the supervisor's instructions (`workflows/deal-screening.ts`):
+The same review is also in **Workflows**, where the pauses for the DealLead are enforced by the engine rather than the supervisor's instructions (`workflows/`). Every input and reply is a sentence in your own words. Each run is its own session, at `/poc/sessions/<runId>`.
 
-1. Run it with `{"deal": "Riverside Flats", "criteria": ["Multifamily only", "Cap rate at least 5.5%", "Asking price under $60M"]}`. The screening specialist maps each criterion, and the run suspends at `confirm-mapping`, showing the mapping. Nothing is checked yet.
-2. Resume with `{"confirmed": true}`, or correct a criterion first: `{"confirmed": true, "corrections": [{"criterion": "Asking price under $60M", "fieldKey": "purchase_price", "test": {"operator": "<", "target": 60000000}}]}`. `{"confirmed": false}` stops without checking.
-3. The result is the verdict table. The run's session record is at `/poc/sessions/<runId>`.
+| Workflow | Run with | Then |
+|---|---|---|
+| **deal-review**, the whole review | `Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking price under $60M.` | It pauses with the mapping: reply `Looks good, go ahead.` or correct it (`Price means purchase price.`). It checks, then pauses with the verdict: reply with what's next, e.g. `Chase the open criteria and compare with comps.` or `All of it. My decision: pursue to LOI.` or `Stop.` |
+| **deal-screening**, screening only | The same request | One pause, for the mapping |
+| **comps-comparison** | `Riverside Flats` | Nothing: it returns the comparison |
+| **follow-up-tasks** | `Riverside Flats: cap rate at least 5.5% failed at 5.4, and asking price under $60M is unknown.` | Nothing: it returns the proposed tasks |
 
-A field the model names that doesn't exist, or that the User can't read, becomes a question instead of a mapping.
+A field the model names that doesn't exist, or that the User can't read, becomes a question instead of a mapping. Which next steps deal-review runs is read from your reply in code, not by a model, so it never runs a step you didn't ask for. Tasks and the memo are proposals: accept them in the review panel. There is no standalone memo workflow, because a memo may quote only what its own run sourced.
+
+### What each agent can do
+
+Reads are direct. Every write is a proposal the DealLead accepts in the review panel, and no tool can change a deal's stage, status or owner.
+
+| Agent | Reads | Proposes |
+|---|---|---|
+| Supervisor | `session-status`: what ran, what's pending, cost so far, the kill switch | Nothing; it routes |
+| Screening | `find-deal`, `search-deals`, `describe-deal-fields`, `read-deal`, `check-criteria` | `propose-field-value`: a value someone stated, with its source |
+| Comparison | `compare-to-comps` (optionally recent comps only, or without some), `list-comps` | Nothing |
+| Task | `read-deal-team`, `list-deal-tasks` | `propose-task`, `propose-task-change` (reassign or move a due date), `propose-deal-note` |
+| Memo | `list-session-sources`, `list-session-proposals` | `propose-memo` |
+
+Try, in the supervisor's chat: `Which deals are in screening?`, `Show me the Austin comps that sold this year.`, `Compare Riverside with comps sold since January only.`, `The broker says the asking price on Riverside is $61M, put that on the deal.`, `Move the cap rate task to Ana and give her until the 20th.`, `Note on Riverside: broker wants best and final by the 20th.`, `Where are we on this review?`
 
 Request context keys: `userRole` (`DealLead` or `Analyst`), `userId` (`U-1` Dana Kim, `U-2` Raj Patel) and `tenantId` (`T-demo`). As an Analyst, the seller reserve becomes Unknown. `Lamar Station` has only two comps, so the comparison refuses to flag.
 

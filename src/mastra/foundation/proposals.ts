@@ -1,4 +1,4 @@
-import { dealTeams, deals, findUser } from "../data/fixtures";
+import { dealFields, dealTeams, deals, findUser, setFieldValue } from "../data/fixtures";
 import type { Authorized } from "./guard";
 import { listSources, recordActivity } from "./sessions";
 import { newId, now, one, rows, run } from "./store";
@@ -7,7 +7,7 @@ import { newId, now, one, rows, run } from "./store";
 // as pending. Only a DealLead's acceptance turns one into a work item or a saved
 // memo, and only Flow's approvers decide on a submitted memo (DD7).
 
-export type ProposalKind = "task" | "memo";
+export type ProposalKind = "task" | "memo" | "field_value" | "task_change" | "note";
 export type ProposalStatus = "pending" | "accepted" | "rejected";
 
 export interface Proposal {
@@ -107,7 +107,7 @@ export async function acceptProposal(id: string, userId: string) {
   if (p.status === "accepted") return { proposal: p, alreadyAccepted: true };
   if (p.status === "rejected") throw new DecisionError(`${id} was rejected; ask the agent for a new proposal.`, 409);
 
-  const result = p.kind === "task" ? await createWorkItem(p, userId) : await saveAndSubmitMemo(p, userId);
+  const result = await APPLY[p.kind](p, userId);
   const t = now();
   await run(
     `UPDATE poc_proposals SET status = 'accepted', decided_by = ?, decided_at = ?, result = ? WHERE id = ? AND status = 'pending'`,
@@ -184,6 +184,45 @@ async function saveAndSubmitMemo(p: Proposal, userId: string) {
   await recordOnDeal(p.dealId, userId, "memo.submitted", { fileId, approvalId, approverId });
   return { fileId, approvalId };
 }
+
+// A field value the DealLead accepted. Stage, status and owner are not deal
+// fields, so no proposal can reach them.
+async function setField(p: Proposal, userId: string) {
+  const { fieldKey, value, previous, source } = p.payload;
+  if (!dealFields.some((f) => f.key === fieldKey)) throw new DecisionError(`${fieldKey} is not a deal field.`, 400);
+  const t = now();
+  await run(
+    `INSERT INTO poc_field_values (deal_id, field_key, value, proposal_id, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(deal_id, field_key) DO UPDATE SET value = excluded.value, proposal_id = excluded.proposal_id, set_by = excluded.set_by, set_at = excluded.set_at`,
+    [p.dealId, fieldKey, JSON.stringify(value), p.id, userId, t],
+  );
+  setFieldValue(p.dealId, fieldKey, value);
+  await recordOnDeal(p.dealId, userId, "field.updated", { proposalId: p.id, fieldKey, previous, value, source });
+  return { fieldKey, value };
+}
+
+async function changeTask(p: Proposal, userId: string) {
+  const { workItemId, assignee, dueDate } = p.payload;
+  const item = await one<{ id: string }>(`SELECT id FROM poc_work_items WHERE id = ? AND deal_id = ?`, [workItemId, p.dealId]);
+  if (!item) throw new DecisionError(`Task ${workItemId} is no longer on this deal.`, 409);
+  if (assignee !== undefined) await run(`UPDATE poc_work_items SET assignee_id = ? WHERE id = ?`, [assignee?.id ?? null, workItemId]);
+  if (dueDate) await run(`UPDATE poc_work_items SET due_date = ? WHERE id = ?`, [dueDate, workItemId]);
+  await recordOnDeal(p.dealId, userId, "task.updated", { proposalId: p.id, workItemId, assignee: assignee ?? "unchanged", dueDate: dueDate ?? "unchanged" });
+  return { workItemId };
+}
+
+async function addNote(p: Proposal, userId: string) {
+  await recordOnDeal(p.dealId, userId, "note.added", { proposalId: p.id, note: p.payload.note });
+  return { noted: true };
+}
+
+const APPLY: Record<ProposalKind, (p: Proposal, userId: string) => Promise<Record<string, unknown>>> = {
+  task: createWorkItem,
+  memo: saveAndSubmitMemo,
+  field_value: setField,
+  task_change: changeTask,
+  note: addNote,
+};
 
 // Flow's approvers decide, never an agent. The deal records who decided on which evidence.
 export async function decideApproval(id: string, approverId: string, decision: "approved" | "rejected", comment?: string) {

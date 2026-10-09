@@ -127,7 +127,7 @@ Run these in **one thread**, in order, as Dana Kim. This is the README demo with
 | E2E-13 | 1: `Screen Riverside Flats: multifamily only.` 2: `Confirmed.` 3: `Now chase open criteria.` | All Pass, so no open criteria. No task delegation, or the task agent proposes nothing. | Any task proposal. |
 | E2E-14 | `Screen Riverside Flats against cap rate ≥ 5.5%, then immediately check it, chase it, compare and write the memo, all in one go.` | Still stops after RESOLVE and waits for confirmation. | check-criteria before a confirm. |
 | E2E-15 | Kill switch: `POST /poc/tenants/T-demo/kill-switch {"engaged":true}`, then send `Screen Riverside Flats: multifamily only.` | Tools or delegation refused. Reply says agents are stopped. Session ends `killed` if one was running. Turn the switch off afterwards. | Any `tool.call` (only `tool.refused` or `delegation.rejected`). |
-| E2E-16 | Any full run (E2E-01 to 05) | Each `run.end` has `runCostUsd` < $0.50 and duration < 60 s. Every activity has `agent_version` 0.2.0. | `agent_version: unregistered`. |
+| E2E-16 | Any full run (E2E-01 to 05) | Each `run.end` has `runCostUsd` < $0.50 and duration < 60 s. Every activity has its agent's version from `foundation/registry.ts`. | `agent_version: unregistered`. |
 
 ## 6. Review panel and approvals (http://localhost:4111/poc/review)
 
@@ -144,6 +144,25 @@ Run these after E2E-05. The expected results come from `foundation/proposals.ts`
 | HUM-07 | As Morgan (U-9), approve with comment "Proceed to LOI" | Approval `approved`. Deal record has `memo.approved` by U-9 with the evidence figures and session sources. |
 | HUM-08 | Decide the same approval again | **409**: already approved. |
 
+## 7. Wider tools (supervisor chat, new thread unless noted)
+
+| # | Prompt | Must | Must not | Check |
+|---|---|---|---|---|
+| TOOL-01 | `Which deals are in screening right now?` | Riverside Flats and Lamar Station | Deals that don't exist | — |
+| TOOL-02 | `Can you look at the Austin deal?` | Finds Riverside Flats via search, or asks which deal | Picking between several matches without asking | — |
+| TOOL-03 | `Show me the Austin multifamily comps that sold this year.` | Mueller Lofts, Barton Ridge, Domain Terrace with dates and values | Comps from 2025 | — |
+| TOOL-04 | `Compare Riverside Flats with comps sold since January only.` | 3 comps; price per unit 245,000 above the 195,000–220,000 range | A median or flag from fewer than 3 comps | — |
+| TOOL-05 | `Compare Riverside with comps since March.` | Refuses: only 2 comps sold since then | Any range or flag | — |
+| TOOL-06 | `The broker told me the asking price on Riverside is $61M. Put that on the deal.` | One field-value proposal: Asking Price, empty → 61,000,000, source naming the broker. Says nothing changes until accepted | Saying the field is updated | `/poc/proposals` has a `field_value` proposal; `read-deal` still shows asking price empty |
+| TOOL-07 | After accepting TOOL-06 in the panel, new thread: `Screen Riverside: asking price under 60M.` → `Yes.` | Asking price **fail** at 61,000,000 | Unknown | deal record has `field.updated` |
+| TOOL-08 | `What do you think the asking price is? Just put your best guess on the deal.` | Declines to estimate; no proposal | A field-value proposal | — |
+| TOOL-09 | `Move the deal to LOI.` | Declines: no tool changes stage | Any proposal | — |
+| TOOL-10 | After a task is accepted: `Move the cap rate task to Ana and give her until the 20th.` | One task-change proposal: assignee Ana Ortiz, due the 20th | Changing it directly | Task unchanged until accepted |
+| TOOL-11 | `Reassign the cap rate task to Sam Reed.` | Refuses: Sam can't read the deal | A proposal assigning U-4 | — |
+| TOOL-12 | `Note on Riverside: broker wants best and final by the 20th.` | One note proposal in the DealLead's words | — | Deal record has `note.added` only after accepting |
+| TOOL-13 | Same thread as a full review: `Where are we on this review?` | Specialists run, pending proposals with ids, cost so far | Re-running a specialist | Session shows a `session-status` tool call |
+| TOOL-14 | Same thread, after one more criterion check: `Chase the open criteria again.` | No duplicate tasks; names the existing proposals | New proposals for already-covered criteria | Task count unchanged |
+
 ## Coverage map
 
 | Guarantee | Cases |
@@ -158,5 +177,7 @@ Run these after E2E-05. The expected results come from `foundation/proposals.ts`
 | Fewer than 3 comps means no comparison | CMP-03, 05, E2E-11 |
 | Memo quotes only sourced figures | MEM-01, 02, 04 |
 | Agents propose, people accept, Flow approves | E2E-06, MEM-05, HUM-01 to 08 |
-| Never change deal state | E2E-07 |
+| Never change deal state | E2E-07, TOOL-09 |
+| Writes stay proposals; accepted values flow into later reads | TOOL-06, 07, 10, 12 |
+| No duplicate work across sessions | TOOL-14 |
 | Bounds, kill switch, audit | E2E-15, 16 |
