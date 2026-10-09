@@ -67,6 +67,56 @@ flowchart LR
 | Memo specialist | Drafts | Only from values the session already sourced | One memo proposal |
 | Flow approvers | Decide | In Flow, never through an agent | An approved or rejected memo, with who decided on which evidence recorded on the deal |
 
+## How the Agents Connect
+
+The specialists never talk to each other. The supervisor routes every request, and results pass between specialists through the supervisor's prompts and the session's shared record.
+
+```mermaid
+flowchart TD
+    DL([DealLead])
+    S[Supervisor]
+    subgraph SP[Specialists]
+        direction LR
+        Sc[Screening]
+        C[Comparison]
+        T[Task]
+        M[Memo]
+    end
+    subgraph SR[Session record]
+        direction LR
+        V[(Sourced values)]
+        A[(Activities, versions, cost)]
+    end
+    P[(Proposals)]
+    RP[/Review panel/]
+    S --> Sc & C & T & M
+    DL <-->|chat| S
+    Sc -->|values read| V
+    C -->|values read| V
+    V -->|the only figures it may quote| M
+    T --> P
+    M --> P
+    Sc -->|stated field values| P
+    P --> RP
+    DL -->|accepts or rejects| RP
+```
+
+*Key: a rectangle is an agent, a cylinder is stored state, and the slanted box is where the DealLead acts. Every tool call also lands in the activities record, which the diagram leaves out.*
+
+1. **Through the supervisor.** It writes each specialist a complete brief, since the task and memo specialists see only that brief, never the DealLead's conversation. Asking for a memo, it passes the verdict, the comparison and the proposed tasks' ids.
+2. **Through the session record.** Every value a specialist reads is recorded with its source. The memo specialist reads that record and may quote only those values, so screening and comparison feed the memo without either calling it.
+3. **Through proposals.** Every write lands as a pending proposal. The task specialist reads the deal's tasks and proposals before proposing, so an open item never gets a second task, even across sessions.
+4. **One hop.** A specialist cannot delegate to another, per deal screening's `05` §Bounds and Cost. Each run stays bounded, and every step traces to one agent and version.
+
+The POC offers two ways in:
+
+| Way in | Shape | Use |
+|---|---|---|
+| Supervisor chat | Routes whatever the DealLead asks, in any order | The full experience, including recording a stated value, changing a task, adding a note and asking where the review stands |
+| `deal-review` workflow | A fixed sequence: screen, confirm, check, then tasks, comps and memo as the DealLead chooses | The standard review, with each pause for the DealLead enforced by the engine rather than the supervisor's instructions |
+
+A run's handoffs show in the supervisor's traces: each brief the supervisor wrote, the tools the specialist called and what came back.
+
 ## Foundation by Layer
 
 | Layer | What the POC needs | How the POC tests it | Stack and requirements |
