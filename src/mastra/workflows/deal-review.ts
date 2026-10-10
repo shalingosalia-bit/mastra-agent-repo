@@ -2,14 +2,19 @@ import type { RequestContext } from "@mastra/core/request-context";
 import { createStep, createWorkflow } from "@mastra/core/workflows";
 import { z } from "zod";
 import { listProposals } from "../foundation/proposals";
+import { proposeDealNoteTool } from "../tools/proposal-tools";
 import { checkCriteria, confirmMapping, resolveCriteria, screeningResult, verdictRows } from "./screening-steps";
 import { compare, comparisonResult, inSession, REVIEW_PANEL, taskProposal, taskProposals } from "./shared";
 
 // The whole deal review as one workflow (brief §Agent Workflow, steps 1 to 10):
-// screen, wait for the DealLead to confirm, check, then wait again for what they
-// want next. Tasks, comps and the memo run only when the DealLead asks for them,
-// in that order, so the memo can quote what the run sourced. Every write is a
-// proposal the DealLead accepts in the review panel.
+// screen, wait for the DealLead to confirm, check, then two decisions the
+// verdict drives, then wait for what they want next.
+//   - Out of the buy box: a must-have criterion failed, so ask whether to go on.
+//   - Missing data: a criterion is Unknown, so ask whether to request it.
+// Each is a yes/no question to the DealLead, never an action taken for them.
+// Tasks, comps and the memo run only when the DealLead asks for them, in that
+// order, so the memo can quote what the run sourced. Every write is a proposal
+// the DealLead accepts in the review panel.
 
 // Which next steps the reply asks for. Read in code, not by a model, so the
 // workflow never starts a step the DealLead did not ask for.
@@ -27,10 +32,98 @@ export function readNextSteps(reply: string) {
   };
 }
 
+// A yes or a no, read in code. Anything else gets the question again.
+export function readYesNo(reply: string): "yes" | "no" | null {
+  const r = reply.toLowerCase();
+  const no = /\b(no|nope|stop|don't|dont|skip|end|halt|pass on it)\b/.test(r);
+  const yes = /\b(yes|yep|yeah|sure|ok|okay|continue|go ahead|proceed|keep going|do it|please)\b/.test(r);
+  return yes === no ? null : yes ? "yes" : "no";
+}
+
+// Criteria whose failure puts a deal outside the buy box, by the field checked.
+const MUST_HAVE = new Set(["Property Type", "Market"]);
+type Rows = z.infer<typeof verdictRows>;
+const outsideBuyBox = (rows: Rows) => rows.filter((r) => r.verdict === "fail" && MUST_HAVE.has(r.field));
+const missing = (rows: Rows) => rows.filter((r) => r.verdict === "unknown");
+
+const yesNo = z.object({ reply: z.string().describe("yes or no, in your own words") });
+
+const buyBoxGate = createStep({
+  id: "buy-box-gate",
+  description: "A must-have criterion (property type or market) failed. Asks the DealLead whether to continue; on no, ends the review and proposes a note saying why.",
+  inputSchema: screeningResult,
+  suspendSchema: z.object({ outside: verdictRows, message: z.string() }),
+  resumeSchema: yesNo,
+  outputSchema: z.object({ stopped: z.boolean(), outside: z.array(z.string()) }),
+  execute: async ({ inputData, resumeData, suspend, requestContext, runId }) => {
+    const outside = outsideBuyBox(inputData.rows);
+    const what = outside.map((r) => `${r.field} is ${r.value}`).join(" and ");
+    if (!resumeData) {
+      return await suspend({ outside, message: `${inputData.deal} is outside your buy box: ${what}. Continue the review anyway? Reply yes to continue, or no to stop here.` });
+    }
+    const answer = readYesNo(resumeData.reply);
+    if (!answer) return await suspend({ outside, message: `Please answer yes to continue the review of ${inputData.deal}, or no to stop here.` });
+    if (answer === "no") {
+      // The task specialist holds the note grant; the note is a proposal, as any write is.
+      await proposeDealNoteTool.execute!(
+        { dealId: inputData.dealId, note: `Screened out: outside the buy box (${what}).` },
+        { requestContext: inSession(requestContext as RequestContext, runId), agent: { agentId: "task", threadId: runId } } as any,
+      );
+    }
+    return { stopped: answer === "no", outside: outside.map((r) => r.criterion) };
+  },
+});
+
+const withinBuyBox = createStep({
+  id: "within-buy-box",
+  description: "Every must-have criterion passed or could not be checked, so the review goes on.",
+  inputSchema: screeningResult,
+  outputSchema: z.object({ stopped: z.boolean(), outside: z.array(z.string()) }),
+  execute: async () => ({ stopped: false, outside: [] }),
+});
+
+const gateOutcome = z.object({}).passthrough();
+const stoppedAtGate = (get: (id: string) => any) => Boolean(get("buy-box-gate")?.stopped);
+
+const requestMissingData = createStep({
+  id: "request-missing-data",
+  description: "Some criteria are Unknown. Asks the DealLead whether to request the missing values; on yes, the task specialist proposes a request for each.",
+  inputSchema: gateOutcome,
+  suspendSchema: z.object({ missing: verdictRows, message: z.string() }),
+  resumeSchema: yesNo,
+  outputSchema: z.object({ requested: z.array(taskProposal) }),
+  execute: async ({ resumeData, suspend, getStepResult, mastra, requestContext, runId }) => {
+    const checked = getStepResult(checkCriteria);
+    const gaps = missing(checked.rows);
+    const list = gaps.map((r) => r.criterion).join("; ");
+    if (!resumeData) {
+      return await suspend({ missing: gaps, message: `${gaps.length} value${gaps.length > 1 ? "s are" : " is"} missing on ${checked.deal}: ${list}. Shall I propose requests for ${gaps.length > 1 ? "them" : "it"}? Reply yes or no.` });
+    }
+    const answer = readYesNo(resumeData.reply);
+    if (!answer) return await suspend({ missing: gaps, message: `Please answer yes to propose requests for: ${list}, or no to skip.` });
+    if (answer === "no") return { requested: [] };
+    await mastra.getAgent("taskAgent").generate(
+      `Deal ${checked.dealId}. These values are missing from the deal. Propose one task per row to request the value, from the broker unless someone on the deal team holds it:\n` +
+        "| Criterion | Field | Deal value | Verdict |\n" +
+        gaps.map((r) => `| ${r.criterion} | ${r.field} | | Unknown |`).join("\n"),
+      { requestContext: inSession(requestContext as RequestContext, runId) },
+    );
+    return { requested: await taskProposals(runId) };
+  },
+});
+
+const skipMissingData = createStep({
+  id: "no-missing-data",
+  description: "Nothing is Unknown, or the review stopped at the buy box, so there is nothing to request.",
+  inputSchema: gateOutcome,
+  outputSchema: z.object({ requested: z.array(taskProposal) }),
+  execute: async () => ({ requested: [] }),
+});
+
 const chooseNext = createStep({
   id: "choose-next",
   description: "Shows the verdict and waits for the DealLead to say what's next: chase open criteria, compare with comps, draft the memo, or stop.",
-  inputSchema: screeningResult,
+  inputSchema: gateOutcome,
   suspendSchema: z.object({ deal: z.string(), rows: verdictRows, message: z.string() }),
   resumeSchema: z.object({
     reply: z.string().describe("What next, e.g. chase the open criteria and compare with comps / all of it, my decision: pursue to LOI / stop"),
@@ -43,15 +136,16 @@ const chooseNext = createStep({
     memo: z.boolean(),
     decision: z.string().nullable(),
   }),
-  execute: async ({ inputData, resumeData, suspend }) => {
-    const nothing = { dealId: inputData.dealId, rows: inputData.rows, tasks: false, comps: false, memo: false, decision: null };
-    if (!inputData.rows.length) return nothing;
+  execute: async ({ resumeData, suspend, getStepResult }) => {
+    const checked = getStepResult(checkCriteria);
+    const nothing = { dealId: checked.dealId, rows: checked.rows, tasks: false, comps: false, memo: false, decision: null };
+    if (!checked.rows.length || stoppedAtGate((id) => getStepResult(id))) return nothing;
     if (!resumeData) {
-      const open = inputData.rows.filter((r) => r.verdict !== "pass").length;
+      const open = checked.rows.filter((r) => r.verdict !== "pass").length;
       return await suspend({
-        deal: inputData.deal,
-        rows: inputData.rows,
-        message: `${inputData.note} ${open} of ${inputData.rows.length} criteria are open.\n\n` +
+        deal: checked.deal,
+        rows: checked.rows,
+        message: `${checked.note} ${open} of ${checked.rows.length} criteria are open.\n\n` +
           "What next? You can chase the open criteria, compare with comps, draft the memo, or ask for all of it. " +
           "Include your decision if you've made one (\"my decision: pursue to LOI\"). Say \"stop\" to end here.",
       });
@@ -131,41 +225,54 @@ const summarize = createStep({
     deal: z.string(),
     verdict: verdictRows,
     unresolved: z.array(z.string()),
+    outsideBuyBox: z.array(z.string()),
+    stoppedAtBuyBox: z.boolean(),
     tasks: z.array(taskProposal),
     comparison: comparisonResult.nullable(),
     memo: memoProposal.nullable(),
     memoText: z.string().nullable(),
     next: z.string(),
   }),
-  execute: async ({ inputData, getStepResult }) => {
+  execute: async ({ inputData, getStepResult, runId }) => {
     const checked = getStepResult(checkCriteria);
-    const { tasks } = getStepResult(proposeTasks);
+    const gate = (getStepResult("buy-box-gate") as any) ?? { stopped: false, outside: [] };
     const { comparison } = getStepResult(compareComps);
-    const waiting = tasks.length + (inputData.memo ? 1 : 0);
+    const tasks = await taskProposals(runId);
+    const waiting = (await listProposals({ sessionId: runId, status: "pending" })).length;
     return {
       deal: checked.deal,
       verdict: checked.rows,
       unresolved: checked.unresolved,
+      outsideBuyBox: gate.outside,
+      stoppedAtBuyBox: gate.stopped,
       tasks,
       comparison,
       memo: inputData.memo,
       memoText: inputData.memoText,
       next: waiting
         ? `${waiting} proposal${waiting > 1 ? "s" : ""} wait for you. ${REVIEW_PANEL} An accepted memo goes to Flow, where Morgan Lee approves or rejects it.`
-        : `${checked.note} Nothing waits for you.`,
+        : `${gate.stopped ? "Stopped at the buy box. " : ""}${checked.note} Nothing waits for you.`,
     };
   },
 });
 
 export const dealReviewWorkflow = createWorkflow({
   id: "deal-review",
-  description: "The whole deal review: screen against your criteria, confirm the mapping, then chase open criteria, compare with comps and draft the memo, as you ask.",
+  description: "The whole deal review: screen against your criteria and confirm the mapping; decide on a deal outside the buy box and on missing values; then chase open criteria, compare with comps and draft the memo, as you ask.",
   inputSchema: resolveCriteria.inputSchema,
   outputSchema: summarize.outputSchema,
 })
   .then(resolveCriteria)
   .then(confirmMapping)
   .then(checkCriteria)
+  .branch([
+    [async ({ inputData }) => outsideBuyBox(inputData.rows).length > 0, buyBoxGate],
+    [async ({ inputData }) => outsideBuyBox(inputData.rows).length === 0, withinBuyBox],
+  ])
+  .branch([
+    [async ({ getStepResult }) => !stoppedAtGate((id) => getStepResult(id)) && missing(getStepResult(checkCriteria).rows).length > 0, requestMissingData],
+    [async ({ getStepResult }) => stoppedAtGate((id) => getStepResult(id)) || missing(getStepResult(checkCriteria).rows).length === 0, skipMissingData],
+  ])
   .then(chooseNext)
   .then(proposeTasks)
   .then(compareComps)

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { listProposals } from "../src/mastra/foundation/proposals";
 import { resetStore, rows } from "../src/mastra/foundation/store";
 import { listSessionSourcesTool, proposeMemoTool, proposeTaskTool } from "../src/mastra/tools/proposal-tools";
-import { dealReviewWorkflow, readNextSteps } from "../src/mastra/workflows/deal-review";
+import { dealReviewWorkflow, readNextSteps, readYesNo } from "../src/mastra/workflows/deal-review";
 
 // The deal-review workflow past screening, with stubs in place of the model.
 // The task and memo stubs call the real proposal tools, so the guard, the dedupe
@@ -27,15 +27,24 @@ const riverside = [
   { criterion: "asking price under $60M", fieldKey: "asking_price", operator: "<", target: 60_000_000 },
 ];
 
-const screeningAgent = stub("screening", async (prompt) => prompt.startsWith("INTERPRET")
-  ? { object: { proceed: true, corrections: [] } }
-  : { object: { deal: "Riverside Flats", criteria: riverside.map((m) => ({ fieldLabel: null, question: null, ...m })) } });
+const lamar = [
+  { criterion: "multifamily only", fieldKey: "property_type", operator: "=", target: "Multifamily" },
+  { criterion: "cap rate at least 5.5%", fieldKey: "cap_rate", operator: ">=", target: 5.5 },
+];
+
+// Maps the request to the given deal and criteria, and reads every reply as a go.
+function screeningAgent(deal: string, mapped: typeof riverside) {
+  return stub("screening", async (prompt) => prompt.startsWith("INTERPRET")
+    ? { object: { proceed: true, corrections: [] } }
+    : { object: { deal, criteria: mapped.map((m) => ({ fieldLabel: null, question: null, ...m })) } });
+}
 
 // One proposal per open criterion named in the prompt's table.
 const taskAgent = stub("task", async (prompt, { requestContext }) => {
   const open = [...prompt.matchAll(/^\| (.+?) \|.*\| (Fail|Unknown) \|$/gm)].map((m) => m[1]);
   for (const criterion of open) {
-    await proposeTaskTool.execute!({ dealId: "D-1001", criterion, title: `Resolve: ${criterion}`, assigneeId: "U-2" }, toolCtx(requestContext, "task"));
+    const dealId = prompt.match(/Deal (D-\d+)/)?.[1] ?? "D-1001";
+    await proposeTaskTool.execute!({ dealId, criterion, title: `Resolve: ${criterion}`, assigneeId: "U-2" }, toolCtx(requestContext, "task"));
   }
   return { text: `Proposed ${open.length} tasks.` };
 });
@@ -52,9 +61,9 @@ const memoAgent = stub("memo", async (prompt, { requestContext }) => {
   return { text: "Memo drafted." };
 });
 
-function mastra() {
+function mastra(deal = "Riverside Flats", mapped = riverside) {
   return new Mastra({
-    agents: { screeningAgent, taskAgent, memoAgent },
+    agents: { screeningAgent: screeningAgent(deal, mapped), taskAgent, memoAgent },
     workflows: { dealReviewWorkflow },
     storage: new LibSQLStore({ id: "wf-review-test", url: ":memory:" }),
     logger: false,
@@ -69,10 +78,19 @@ function rc() {
   return r;
 }
 
-async function toChooseNext() {
-  const run = await mastra().getWorkflow("dealReviewWorkflow").createRun();
-  await run.start({ inputData: { request: "Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking under 60M." }, requestContext: rc() });
+async function confirmed(deal = "Riverside Flats", mapped = riverside) {
+  const run = await mastra(deal, mapped).getWorkflow("dealReviewWorkflow").createRun();
+  await run.start({ inputData: { request: `Screen ${deal}.` }, requestContext: rc() });
   const res: any = await run.resume({ step: "confirm-mapping", resumeData: { reply: "Looks good." }, requestContext: rc() });
+  return { run, res };
+}
+
+const resume = (run: any, step: string, reply: string) => run.resume({ step, resumeData: { reply }, requestContext: rc() });
+
+// Riverside's asking price is Unknown, so the run asks about missing data first.
+async function toChooseNext() {
+  const { run } = await confirmed();
+  const res: any = await resume(run, "request-missing-data", "No, skip that.");
   return { run, res };
 }
 
@@ -118,6 +136,67 @@ describe("deal-review workflow", () => {
     const { run } = await toChooseNext();
     const done: any = await run.resume({ step: "choose-next", resumeData: { reply: "Stop here, thanks." }, requestContext: rc() });
     expect(done.result).toMatchObject({ tasks: [], comparison: null, memo: null, next: expect.stringMatching(/Nothing waits for you/) });
+  });
+});
+
+describe("decision: outside the buy box", () => {
+  it("asks before going on when a must-have criterion fails", async () => {
+    const { res } = await confirmed("Lamar Station", lamar);
+    expect(res.status).toBe("suspended");
+    expect(res.steps["buy-box-gate"].suspendPayload.message).toMatch(/outside your buy box: Property Type is Office/);
+    expect(res.steps["within-buy-box"]).toBeUndefined();
+  });
+
+  it("on no, ends the review and proposes a note saying why", async () => {
+    const { run } = await confirmed("Lamar Station", lamar);
+    const done: any = await resume(run, "buy-box-gate", "No, stop here.");
+    expect(done.status).toBe("success");
+    expect(done.result).toMatchObject({ stoppedAtBuyBox: true, tasks: [], comparison: null, memo: null, next: expect.stringMatching(/1 proposal wait/) });
+    const [note] = await listProposals({ sessionId: run.runId });
+    expect(note).toMatchObject({ kind: "note", status: "pending", payload: { note: "Screened out: outside the buy box (Property Type is Office)." } });
+  });
+
+  it("on yes, goes on to what's next", async () => {
+    const { run } = await confirmed("Lamar Station", lamar);
+    const res: any = await resume(run, "buy-box-gate", "Yes, keep going.");
+    expect(res.status).toBe("suspended");
+    expect(res.steps["choose-next"].status).toBe("suspended");
+  });
+
+  it("asks again when the reply is neither yes nor no", async () => {
+    const { run } = await confirmed("Lamar Station", lamar);
+    const res: any = await resume(run, "buy-box-gate", "Hmm, what do you think?");
+    expect(res.steps["buy-box-gate"].suspendPayload.message).toMatch(/Please answer yes/);
+  });
+
+  it("skips the gate when every must-have passes", async () => {
+    const { res } = await confirmed();
+    expect(res.steps["within-buy-box"].output).toEqual({ stopped: false, outside: [] });
+    expect(res.steps["buy-box-gate"]).toBeUndefined();
+  });
+});
+
+describe("decision: missing data", () => {
+  it("asks whether to request a value that is Unknown, and proposes a request on yes", async () => {
+    const { run, res } = await confirmed();
+    expect(res.steps["request-missing-data"].suspendPayload.message).toMatch(/1 value is missing on Riverside Flats: asking price under \$60M/);
+    const next: any = await resume(run, "request-missing-data", "Yes please.");
+    expect(next.steps["request-missing-data"].output.requested.map((t: any) => t.criterion)).toEqual(["asking price under $60M"]);
+    expect(next.steps["choose-next"].status).toBe("suspended");
+  });
+
+  it("skips the question when nothing is Unknown", async () => {
+    const { res } = await confirmed("Riverside Flats", riverside.slice(0, 2));
+    expect(res.steps["request-missing-data"]).toBeUndefined();
+    expect(res.steps["choose-next"].status).toBe("suspended");
+  });
+});
+
+describe("reading yes or no", () => {
+  it.each([
+    ["Yes, keep going", "yes"], ["sure, go ahead", "yes"], ["No, stop here", "no"], ["skip it", "no"], ["hmm", null], ["yes and no", null],
+  ])("%s", (reply, expected) => {
+    expect(readYesNo(reply)).toBe(expected);
   });
 });
 

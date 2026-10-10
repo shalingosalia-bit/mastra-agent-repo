@@ -101,12 +101,16 @@ Expect: it can't. You accept the memo in the panel, and Morgan approves it in Fl
 
 ## Part 2: the deal-review workflow (Studio → Workflows)
 
-Run it twice, each as a new run.
+Each run takes a different path through the graph. Start a new run for each.
 
-| Run with | 1st pause: reply | 2nd pause: reply | Expect |
+| Path | Run with | Replies, in order | Expect |
 |---|---|---|---|
-| `Screen Lamar Station: multifamily only, cap rate at least 5.5%, at least 90% occupied.` | `Looks good.` | `Chase the open criteria and compare with comps. Skip the memo.` | Fail (Office), Pass (7.1), Fail (78%). Two tasks, assigned to Dana, Raj or no one. Comps **not compared**: only two. No memo. |
-| `Screen Riverside Flats: in an opportunity zone, occupancy at least 90%.` | `Fine, check what you can.` | `Stop.` | Opportunity zone comes back as a question and stays unresolved. Occupancy **Pass** (93%). Ends without proposing anything. |
+| **Outside the buy box, stop** | `Screen Lamar Station: multifamily only, cap rate at least 5.5%.` | `Looks good.` → `No, stop here.` | Fail (Office), Pass (7.1). The buy-box question, then the run ends with a proposed note: "Screened out: outside the buy box (Property Type is Office)". |
+| **Outside the buy box, continue** | The same request | `Looks good.` → `Yes, keep going.` → `Compare with comps.` | Goes on past the gate. Comps **not compared**: only two. |
+| **Missing data, request it** | `Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking price under $60M.` | `Looks good.` → `Yes please.` → `All of it. My decision: pursue to LOI.` | Skips the buy-box gate. Asks about the missing asking price, and proposes a request for it. Then the follow-ups, comps with price per unit above range, and a memo with the decision. |
+| **Nothing missing** | `Screen Riverside Flats: multifamily only, occupancy at least 90%.` | `Looks good.` → `Stop.` | Skips both questions and goes straight to what's next. Ends with nothing proposed. |
+
+An unclear answer to a yes/no question, like `Hmm, what do you think?`, gets the question again.
 
 **Optional finale: the kill switch.** Engage it in the panel, then tell the supervisor *"Screen Lamar Station: multifamily only."* It should refuse and say agents are stopped. Release the switch afterwards.
 

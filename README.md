@@ -34,10 +34,13 @@ The DealLead accepts proposals only in the panel. The supervisor can't accept, s
 
 1. **Run** with a request, e.g. `Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking price under $60M.`
 2. It pauses with the mapping. Reply `Looks good, go ahead.`, correct it (`Price means purchase price.`) or `Stop.` Nothing is checked until you reply.
-3. It checks, then pauses with the verdict. Reply with what's next, e.g. `Chase the open criteria and compare with comps.`, `All of it. My decision: pursue to LOI.` or `Stop.`
-4. It runs only what you asked for, in the order tasks, comps, memo, and ends with a summary of what waits for you in the review panel.
+3. It checks, then decides on two things the verdict shows, asking you yes or no each time:
+   - **Outside the buy box:** if property type or market failed, `Continue the review anyway?` A no ends the review and proposes a note on the deal saying why. Deals in the buy box skip this.
+   - **Missing data:** if any criterion is Unknown, `Shall I propose requests for the missing values?` A yes has the task specialist propose a request for each. Deals with nothing missing skip this.
+4. It pauses with the verdict. Reply with what's next, e.g. `Chase the open criteria and compare with comps.`, `All of it. My decision: pursue to LOI.` or `Stop.`
+5. It runs only what you asked for, in the order tasks, comps, memo, and ends with a summary of what waits for you in the review panel.
 
-A field the model names that doesn't exist, or that the User can't read, becomes a question instead of a mapping. Which next steps run is read from your reply in code, not by a model, so the workflow never runs a step you didn't ask for. To run one specialist on its own, ask the supervisor (`Just compare Riverside with comps.`) or chat with that specialist in **Agents**.
+A field the model names that doesn't exist, or that the User can't read, becomes a question instead of a mapping. Your yes, no and what's-next replies are read in code, not by a model, so the workflow never runs a step you didn't ask for; an unclear yes or no gets the question again. To run one specialist on its own, ask the supervisor (`Just compare Riverside with comps.`) or chat with that specialist in **Agents**.
 
 ### What each agent can do
 
