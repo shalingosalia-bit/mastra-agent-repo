@@ -1,6 +1,6 @@
 # Deal review POC: golden test set
 
-Prompts to run against each agent, with the result each one must give. The expected values come from `src/mastra/data/fixtures.ts` and the tool logic, not from a model run. Machine-readable copy: [`golden-set.json`](golden-set.json). For one conversation that walks through everything, see the [demo script](demo-script.md).
+Prompts to run against each agent, with the result each one must give. The expected values come from `src/mastra/data/fixtures.ts` and the tool logic, not from a model run. Machine-readable copy: [`golden-set.json`](golden-set.json). For one conversation that walks through everything, see the [demo script](demo-script.md). To record a short demo, use the [Loom script](loom-script.md).
 
 **How to read a case**
 - **Must**: the case fails without it.
