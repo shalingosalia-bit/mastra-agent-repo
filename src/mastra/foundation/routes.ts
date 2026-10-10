@@ -4,6 +4,7 @@ import { acceptProposal, decideApproval, dealRecord, DecisionError, listProposal
 import { registry } from "./registry";
 import { listSessions, sessionRecord } from "./sessions";
 import { rows } from "./store";
+import { APP_PAGE } from "./app-page";
 import { REVIEW_PAGE } from "./review-page";
 
 // The people's side of the foundation: the DealLead accepts or rejects
@@ -25,6 +26,8 @@ function fail(c: C, err: unknown) {
 }
 
 export const pocRoutes = [
+  registerApiRoute("/poc/app", { method: "GET", handler: async (c) => c.html(APP_PAGE) }),
+
   registerApiRoute("/poc/review", { method: "GET", handler: async (c) => c.html(REVIEW_PAGE) }),
 
   registerApiRoute("/poc/agents", { method: "GET", handler: async (c) => c.json({ agents: Object.values(registry) }) }),

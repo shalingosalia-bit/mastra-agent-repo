@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { findDeal, readValue } from "../src/mastra/data/fixtures";
 import { acceptProposal, dealRecord, listProposals } from "../src/mastra/foundation/proposals";
+import { APP_PAGE } from "../src/mastra/foundation/app-page";
 import { REVIEW_PAGE } from "../src/mastra/foundation/review-page";
 import { resetStore } from "../src/mastra/foundation/store";
 import { compareToCompsTool, listCompsTool } from "../src/mastra/tools/comparison-tools";
@@ -144,7 +145,7 @@ describe("write tools are proposals", () => {
   });
 });
 
-it("the review panel's script parses", () => {
-  const script = REVIEW_PAGE.match(/<script>([\s\S]*)<\/script>/)![1];
+it.each([["review panel", REVIEW_PAGE], ["deal review app", APP_PAGE]])("the %s's script parses", (_name, page) => {
+  const script = page.match(/<script>([\s\S]*)<\/script>/)![1];
   expect(() => new Function(script)).not.toThrow();
 });

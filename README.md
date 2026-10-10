@@ -18,6 +18,8 @@ Open **Deal review supervisor** in Studio and try:
 3. `Chase the open criteria.`
 4. `Compare it with comps, then draft the memo.`
 
+Or test everything from one page: the **deal review app** at http://localhost:4111/poc/app. It has the chat with your past reviews, the proposals waiting for you with Accept and Reject, what the agents did on each turn (handoffs, tools, cost), a switch between Dana, Raj and Morgan, and the kill switch.
+
 Then open the **review panel** at http://localhost:4111/poc/review:
 
 5. As Dana Kim (DealLead), accept or reject each proposed task and the memo. An accepted task becomes a work item. An accepted memo is saved on the deal and submitted to Flow.
