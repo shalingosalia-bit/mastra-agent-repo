@@ -1,32 +1,58 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { deals, dealTeams, findDeal, readValue, visibleFields } from "../data/fixtures";
+import { deals, dealTeams, fieldsOf, findDeal, readValue, sourceOf, visibleFields } from "../data/fixtures";
+import { DealpathNotConnected } from "../data/dealpath/client";
+import { ensureDeal, lookupDeal, searchDealpathFields } from "../data/dealpath/deals";
 import { authorize } from "../foundation/guard";
 import { listProposals } from "../foundation/proposals";
 import { rows } from "../foundation/store";
 
 export const findDealTool = createTool({
   id: "find-deal",
-  description: "Find a deal by its id or name. Returns the deal's id, name and stage.",
-  inputSchema: z.object({ query: z.string().describe("Deal id such as D-1001, or its name") }),
+  description:
+    "Find a deal by its id or name: the sandbox deals first, then Dealpath when it is connected. Returns the deal's id, name and stage, or the Dealpath deals to choose between when several match.",
+  inputSchema: z.object({ query: z.string().describe("Deal id such as D-1001 or DP-22830395, or its name") }),
   execute: async ({ query }, context) => {
     const auth = await authorize("find-deal", "deal.read", context);
     if (!auth.ok) return auth;
-    const deal = findDeal(query);
-    if (!deal) return { found: false as const, message: `No deal matches "${query}".` };
-    return { found: true as const, id: deal.id, name: deal.name, stage: deal.stage };
+    try {
+      const result = await lookupDeal(query);
+      if (result.status === "none") return { found: false as const, message: result.message };
+      if (result.status === "choose") {
+        return { found: false as const, message: `Several Dealpath deals match "${query}". Ask the DealLead which one.`, candidates: result.candidates };
+      }
+      const { deal } = result;
+      return { found: true as const, id: deal.id, name: deal.name, stage: deal.stage, system: deal.origin ? "Dealpath" : "sandbox" };
+    } catch (err) {
+      if (err instanceof DealpathNotConnected) return { found: false as const, message: err.message };
+      throw err;
+    }
   },
 });
 
 export const describeDealFieldsTool = createTool({
   id: "describe-deal-fields",
   description:
-    "List the Tenant's deal fields the caller can read: key, label, type and options. Use it to map each criterion to a field.",
-  inputSchema: z.object({}),
-  execute: async (_input, context) => {
+    "List the deal fields the caller can read: key, label, type and options. For a Dealpath deal, pass searches: one or two words from each criterion (e.g. 'cap rate', 'asking price'), since Dealpath has over a thousand fields. Use it to map each criterion to a field.",
+  inputSchema: z.object({
+    dealId: z.string().optional().describe("The deal being screened"),
+    searches: z.array(z.string()).optional().describe("Words from each criterion, for a Dealpath deal"),
+  }),
+  execute: async ({ dealId, searches }, context) => {
     const auth = await authorize("describe-deal-fields", "fields.read", context);
     if (!auth.ok) return auth;
-    return { fields: visibleFields(auth.actor.role).map(({ key, label, type, options }) => ({ key, label, type, options })) };
+    const deal = dealId ? await ensureDeal(dealId) : undefined;
+    if (!deal?.origin) {
+      return { fields: visibleFields(auth.actor.role).map(({ key, label, type, options }) => ({ key, label, type, options })) };
+    }
+    const onDeal = new Set(Object.keys(deal.fields).map((k) => k.toLowerCase()));
+    const found = searches?.length ? await searchDealpathFields(searches) : fieldsOf(deal, auth.actor.role).map((f) => ({ ...f, matchedTerms: [], semantic: false }));
+    return {
+      system: "Dealpath",
+      fields: found.map(({ key, label, type, options, matchedTerms, semantic }) => ({
+        key, label, type, options, matchedTerms, semantic, hasValueOnDeal: onDeal.has(key.toLowerCase()),
+      })),
+    };
   },
 });
 
@@ -38,15 +64,15 @@ export const readDealTool = createTool({
   execute: async ({ dealId }, context) => {
     const auth = await authorize("read-deal", "deal.read", context);
     if (!auth.ok) return auth;
-    const deal = findDeal(dealId);
+    const deal = await ensureDeal(dealId);
     if (!deal) return { found: false as const, message: `No deal ${dealId}.` };
-    const values = visibleFields(auth.actor.role).map((f) => ({
+    const values = fieldsOf(deal, auth.actor.role).map((f) => ({
       key: f.key,
       label: f.label,
       value: readValue(deal, f.key, auth.actor.role),
-      source: `${deal.name} › ${f.label}`,
+      source: sourceOf(deal, f.label),
     }));
-    return { found: true as const, id: deal.id, name: deal.name, values };
+    return { found: true as const, id: deal.id, name: deal.name, system: deal.origin ? "Dealpath" : "sandbox", values };
   },
 });
 
@@ -58,7 +84,7 @@ export const readDealTeamTool = createTool({
   execute: async ({ dealId }, context) => {
     const auth = await authorize("read-deal-team", "team.read", context);
     if (!auth.ok) return auth;
-    const team = dealTeams[findDeal(dealId)?.id ?? dealId];
+    const team = dealTeams[(await ensureDeal(dealId))?.id ?? dealId];
     if (!team) return { found: false as const, message: `No deal team for ${dealId}.` };
     return { found: true as const, members: team };
   },
@@ -95,7 +121,7 @@ export const listDealTasksTool = createTool({
   execute: async ({ dealId }, context) => {
     const auth = await authorize("list-deal-tasks", "tasks.read", context);
     if (!auth.ok) return auth;
-    const deal = findDeal(dealId);
+    const deal = (await ensureDeal(dealId));
     if (!deal) return { found: false as const, message: `No deal ${dealId}.` };
     const team = dealTeams[deal.id] ?? [];
     const nameOf = (id: string | null) => (id ? team.find((m) => m.id === id)?.name ?? id : null);

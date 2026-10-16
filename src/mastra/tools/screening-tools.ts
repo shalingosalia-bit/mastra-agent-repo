@@ -1,6 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { dealFields, findDeal, readValue, visibleFields } from "../data/fixtures";
+import { fieldDefFor, fieldsOf, readValue, sourceOf } from "../data/fixtures";
+import { ensureDeal } from "../data/dealpath/deals";
 import { authorize } from "../foundation/guard";
 import { recordSources } from "../foundation/sessions";
 
@@ -47,21 +48,21 @@ export const checkCriteriaTool = createTool({
     const auth = await authorize("check-criteria", "fields.read", context);
     if (!auth.ok) return auth;
     const role = auth.actor.role;
-    const deal = findDeal(dealId);
+    const deal = await ensureDeal(dealId);
     if (!deal) return { found: false as const, message: `No deal ${dealId}.` };
-    const readable = new Set(visibleFields(role).map((f) => f.key));
+    const readable = new Set(fieldsOf(deal, role).map((f) => f.key.toLowerCase()));
 
     const rows = criteria.map(({ criterion, fieldKey, test }) => {
-      const def = dealFields.find((f) => f.key === fieldKey);
+      const def = fieldDefFor(deal, fieldKey);
       if (!def) {
         return { criterion, field: fieldKey, value: null, verdict: "unknown" as const, source: null, note: "No such field. Ask the DealLead which field this criterion means." };
       }
       // A field the caller cannot read answers exactly as an empty one does.
-      const value = readable.has(fieldKey) ? readValue(deal, fieldKey, role) : null;
+      const value = deal.origin || readable.has(fieldKey.toLowerCase()) ? readValue(deal, def.key, role) : null;
       if (value === null) {
         return { criterion, field: def.label, value: null, verdict: "unknown" as const, source: null, note: "No value on the deal" };
       }
-      return { criterion, field: def.label, value, verdict: judge(value, test), source: `${deal.name} › ${def.label}` };
+      return { criterion, field: def.label, value, verdict: judge(value, test), source: sourceOf(deal, def.label) };
     });
 
     // Each value read becomes a sourced value the memo may quote (eval case 12).

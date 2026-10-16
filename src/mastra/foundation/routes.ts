@@ -6,6 +6,10 @@ import { listSessions, sessionRecord } from "./sessions";
 import { rows } from "./store";
 import { APP_PAGE } from "./app-page";
 import { REVIEW_PAGE } from "./review-page";
+import { readBuyBox, saveBuyBox } from "./buy-box";
+import { listUploads, saveUpload } from "./documents";
+import { DEFAULT_TENANT } from "../tools/context";
+import { dealpathStatus, finishSignIn, signOut, startSignIn } from "../data/dealpath/client";
 
 // The people's side of the foundation: the DealLead accepts or rejects
 // proposals, Flow's approvers decide on memos, and an admin engages the kill
@@ -102,6 +106,71 @@ export const pocRoutes = [
       if (typeof engaged !== "boolean") return c.json({ error: "engaged must be true or false" }, 400);
       const result = await setKillSwitch(c.req.param("id"), engaged, userOf(c));
       return c.json({ tenantId: c.req.param("id"), engaged, ...result });
+    },
+  }),
+
+  // Dealpath: one browser sign-in, then the agents read deals as that User.
+  registerApiRoute("/poc/dealpath/status", { method: "GET", handler: async (c) => c.json(await dealpathStatus()) }),
+
+  registerApiRoute("/poc/dealpath/connect", {
+    method: "GET",
+    handler: async (c) => {
+      try {
+        const url = await startSignIn();
+        return c.redirect(url ? url.toString() : "/poc/app?dealpath=connected");
+      } catch (e) {
+        return c.html(`<p>Could not start the Dealpath sign-in: ${String(e instanceof Error ? e.message : e).replace(/</g, "&lt;")}</p><p><a href="/poc/app">Back</a></p>`, 502);
+      }
+    },
+  }),
+
+  registerApiRoute("/poc/dealpath/callback", {
+    method: "GET",
+    handler: async (c) => {
+      const code = c.req.query("code");
+      const error = c.req.query("error");
+      if (!code) return c.html(`<p>Dealpath sign-in did not finish${error ? `: ${error.replace(/</g, "&lt;")}` : ""}.</p><p><a href="/poc/app">Back</a></p>`, 400);
+      try {
+        await finishSignIn(code);
+        return c.redirect("/poc/app?dealpath=connected");
+      } catch (e) {
+        return c.html(`<p>Dealpath sign-in failed: ${String(e instanceof Error ? e.message : e).replace(/</g, "&lt;")}</p><p><a href="/poc/dealpath/connect">Try again</a></p>`, 502);
+      }
+    },
+  }),
+
+  registerApiRoute("/poc/dealpath/disconnect", {
+    method: "POST",
+    handler: async (c) => { signOut(); return c.json({ connected: false }); },
+  }),
+
+  // The saved buy box. Anyone may read it; only a DealLead changes it.
+  registerApiRoute("/poc/buy-box", {
+    method: "GET",
+    handler: async (c) => c.json(await readBuyBox(c.req.query("tenantId") ?? DEFAULT_TENANT)),
+  }),
+
+  registerApiRoute("/poc/buy-box", {
+    method: "PUT",
+    handler: async (c) => {
+      const { criteria } = await body(c);
+      if (!Array.isArray(criteria)) return c.json({ error: "criteria must be a list" }, 400);
+      try { return c.json(await saveBuyBox(c.req.query("tenantId") ?? DEFAULT_TENANT, userOf(c), criteria)); } catch (e) { return fail(c, e); }
+    },
+  }),
+
+  // Documents a person uploads for the agents to read: PDFs, as base64 JSON.
+  registerApiRoute("/poc/documents", {
+    method: "GET",
+    handler: async (c) => c.json({ documents: await listUploads(c.req.query("tenantId") ?? DEFAULT_TENANT) }),
+  }),
+
+  registerApiRoute("/poc/documents", {
+    method: "POST",
+    handler: async (c) => {
+      const { name, data } = await body(c);
+      if (typeof name !== "string" || typeof data !== "string") return c.json({ error: "name and data (base64) are required" }, 400);
+      try { return c.json(await saveUpload(c.req.query("tenantId") ?? DEFAULT_TENANT, userOf(c), name, data)); } catch (e) { return fail(c, e); }
     },
   }),
 ];

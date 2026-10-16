@@ -18,7 +18,9 @@ Open **Deal review supervisor** in Studio and try:
 3. `Chase the open criteria.`
 4. `Compare it with comps, then draft the memo.`
 
-Or test everything from one page: the **deal review app** at http://localhost:4111/poc/app. It has the chat with your past reviews, the proposals waiting for you with Accept and Reject, what the agents did on each turn (handoffs, tools, cost), a switch between Dana, Raj and Morgan, and the kill switch.
+Or test everything from one page: the **deal review app** at http://localhost:4111/poc/app. It has the chat with your past reviews, a switch between Dana, Raj and Morgan, and the kill switch. As in Claude, a turn's new proposals show under the reply with a link to review them; nothing is accepted from the chat. The **Inspector** on the right stands in for what a headless DealLead sees elsewhere: the buy box, the proposals waiting with Accept and Reject, and what the agents did on each turn (handoffs, tools, cost).
+
+**Prototype demo:** it runs on the built-in sample deals, Riverside Flats (D-1001) and Lamar Station (D-1002), with no sign-in. `Screen Riverside Flats against the buy box.`, confirm the mapping, then `The asking price for Riverside Flats is $58M, per the broker.` and accept the proposal in review. Attach OM and Connect Dealpath are optional and not needed for the demo.
 
 Then open the **review panel** at http://localhost:4111/poc/review:
 
@@ -27,6 +29,37 @@ Then open the **review panel** at http://localhost:4111/poc/review:
 7. Open a session's record to see each run: who acted, which agent version, what it cost and how it ended.
 
 The DealLead accepts proposals only in the panel. The supervisor can't accept, save or submit anything.
+
+### Headless, from Claude
+
+`npm run dev` also serves an MCP server at `http://localhost:4111/api/mcp/deal-review/mcp`, which Claude connects to. Its tools:
+
+| Tool | Does |
+|---|---|
+| `deal_review` | Passes the DealLead's words to the deal review supervisor and returns its reply. It returns a `conversationId`, which Claude passes back on the next turn, so the agent still has the mapping it is waiting on |
+| `get_buy_box` | Reads the saved buy box |
+| `list_pending_proposals` | Lists what waits for the DealLead, with the review panel's link |
+| `dealpath_connection` | Says whether Dealpath is connected, and where to connect it |
+
+No tool accepts, rejects, resumes or submits (agentic FR51). Proposals are accepted in the review panel at `/poc/review` until card #24 decides where.
+
+Connect Claude Code, which speaks MCP 2026-07-28, the revision this server requires. The repository's `.mcp.json` already names the server, so a Claude Code session opened in this folder, in the desktop app or a terminal, offers to connect it; approve it once. From a terminal elsewhere:
+
+```sh
+claude mcp add --transport http deal-review http://localhost:4111/api/mcp/deal-review/mcp
+```
+
+Then ask Claude: `Check Riverside Flats against the buy box.`, confirm the mapping, and continue as in the app. The server has no sign-in of its own, so it serves localhost only and acts as one sandbox User, Dana Kim by default (`POC_MCP_USER_ID`). Claude Desktop and claude.ai connect only to a public HTTPS address, so they need the server deployed (Mastra Cloud) before they can use it.
+
+Per-person Dealpath sign-in from Claude (the server runs its own OAuth and hands the person to Dealpath's sign-in, so each Claude reads Dealpath as that person) is built and shelved on the branch `dealpath-oauth-mcp`. The prototype doesn't need it. Design: "Deal review MCP: Dealpath sign-in from Claude".
+
+### Real deals, the saved buy box and OMs
+
+The app is an agent test bench. The POC's surface is Claude, headless (card #23): see **Headless, from Claude** below. The app's review panel stands in for card #24, and its buy box editor for card #29.
+
+- **Dealpath deals (optional):** click **Connect Dealpath** and sign in once. The app asks Dealpath's MCP server (`https://mcp.dealpath.com/mcp`) for `mcp:read` only, and keeps the tokens in `~/.config/mastra-agent-repo/`, outside the repository. Then ask for any deal by name, e.g. `Check Shady Grove Logistics against the buy box.` When several deals match, the agent asks which one. Each value cites its Dealpath field, and nothing is written back to Dealpath.
+- **The saved buy box:** the side panel shows the Tenant's buy box, and a DealLead adds, edits or removes criteria and marks must-haves. "Against the buy box" screens with it, and you still confirm the field mapping first.
+- **An OM (optional):** **Attach OM** uploads a PDF and names it in your message. The agent reads it page by page, and offers a value found only in the OM as a proposal citing its page. The verdict stays Unknown until you accept it.
 
 ### The deal-review workflow
 

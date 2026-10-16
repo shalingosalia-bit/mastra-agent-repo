@@ -38,6 +38,12 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS poc_sources (
     session_id TEXT NOT NULL, source TEXT NOT NULL, label TEXT NOT NULL, value TEXT NOT NULL,
     PRIMARY KEY (session_id, source))`,
+  `CREATE TABLE IF NOT EXISTS poc_buy_box (
+    tenant_id TEXT NOT NULL, position INTEGER NOT NULL, criterion TEXT NOT NULL, must_have INTEGER NOT NULL,
+    updated_by TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (tenant_id, position))`,
+  `CREATE TABLE IF NOT EXISTS poc_documents (
+    id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, path TEXT NOT NULL,
+    pages INTEGER, uploaded_by TEXT NOT NULL, uploaded_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS poc_field_values (
     deal_id TEXT NOT NULL, field_key TEXT NOT NULL, value TEXT NOT NULL, proposal_id TEXT NOT NULL,
     set_by TEXT NOT NULL, set_at TEXT NOT NULL, PRIMARY KEY (deal_id, field_key))`,
@@ -86,7 +92,7 @@ export function newId(prefix: string): string {
 // For tests: start from an empty database.
 export async function resetStore() {
   const c = await db();
-  for (const t of ["sessions", "activities", "proposals", "work_items", "files", "approvals", "deal_record", "kill_switches", "sources", "field_values"]) {
+  for (const t of ["sessions", "activities", "proposals", "work_items", "files", "approvals", "deal_record", "kill_switches", "sources", "field_values", "buy_box", "documents"]) {
     await c.execute(`DELETE FROM poc_${t}`);
   }
   restoreFixtures();

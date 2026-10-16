@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "deal-review": {
+      "type": "http",
+      "url": "http://localhost:4111/api/mcp/deal-review/mcp"
+    }
+  }
+}

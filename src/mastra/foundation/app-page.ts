@@ -92,11 +92,21 @@ export const APP_PAGE = /* html */ `<!doctype html>
   .timeline li.refused::before, .timeline li.rejected::before { background:var(--bad); }
   .timeline li.proposal::before { background:var(--good); }
   .flash { color:var(--bad); font-size:13px; margin:4px 2px 8px; min-height:1px; }
+  .bb { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+  .bb input[type=text] { flex:1; min-width:0; font:inherit; font-size:13px; padding:5px 7px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:inherit; }
+  .bb label { font-size:12px; white-space:nowrap; }
+  .attach { cursor:pointer; align-self:flex-end; }
+  .hint { margin-top:6px; }
+  .note { font-size:12px; color:var(--muted); margin:-4px 2px 8px; }
+  .inline-proposals { margin-top:8px; border:1px dashed var(--line); border-radius:12px; padding:10px 12px; background:var(--panel); }
+  .inline-proposals .card { margin:6px 0 0; }
+  .inline-proposals > .row { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .inspector { font-size:15px; font-weight:600; margin:2px 2px 2px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Deal Review <span class="muted small">· agent test bench</span></h1>
+  <h1>Deal Review <span class="muted small">· agent test bench. The POC surface is Claude, through /api/mcp/deal-review/mcp (card #23)</span></h1>
   <div class="right">
     <label class="small">Acting as
       <select id="persona">
@@ -105,6 +115,7 @@ export const APP_PAGE = /* html */ `<!doctype html>
         <option value="U-9|Approver">Morgan Lee · Approver</option>
       </select>
     </label>
+    <span id="dp" class="small"></span>
     <span id="kill"></span>
     <a class="small muted" href="/" target="_blank" rel="noopener">Open Studio</a>
   </div>
@@ -122,14 +133,22 @@ export const APP_PAGE = /* html */ `<!doctype html>
       <div class="working" id="working"></div>
       <form id="form">
         <textarea id="input" rows="1" placeholder="Ask the deal review agent... (Enter to send, Shift+Enter for a new line)"></textarea>
+        <label class="attach" title="Optional: attach an OM as a PDF and the agent reads it page by page. The sample deals do not need one: tell the agent a figure and who stated it instead."><input type="file" id="file" accept="application/pdf" hidden><span class="chip">Attach OM</span></label>
         <button class="primary" id="send" type="submit">Send</button>
       </form>
+      <div class="hint small muted">Prototype: runs on the sample deals Riverside Flats (D-1001) and Lamar Station (D-1002). Attach OM and Connect Dealpath are optional and not needed for the demo.</div>
     </div>
   </section>
 
   <aside class="side">
     <div class="flash" id="flash"></div>
+    <div class="inspector">Inspector</div>
+    <div class="note">Stands in for what a headless DealLead sees elsewhere: in Claude the buy box is read with get_buy_box and changed in chat, tool calls show as Claude's own, and proposals arrive as a link to review.</div>
+    <h2>Buy box</h2>
+    <div class="note">Stands in for card #29: where a DealLead edits the buy box when headless is still open.</div>
+    <div id="buybox"></div>
     <h2 id="waitingTitle">Waiting for you</h2>
+    <div class="note">Stands in for card #24: where the DealLead accepts in the headless POC is still open.</div>
     <div id="waiting"></div>
     <h2>What the agents did</h2>
     <div id="activity"><div class="muted small">Send a message to see each turn's handoffs and tools.</div></div>
@@ -142,6 +161,8 @@ var TENANT = "T-demo";
 var SUGGESTIONS = [
   "What deals do we have in screening right now?",
   "Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking price under $60M, seller reserve under $57M.",
+  "Screen Riverside Flats against the buy box.",
+  "The asking price for Riverside Flats is $58M, per the broker.",
   "How does Riverside stack up against recent sales in Austin?",
   "Where are we on this review?"
 ];
@@ -226,7 +247,7 @@ function showEmpty() {
   var p = persona();
   $("messages").innerHTML = '<div class="empty"><h3>Start a deal review</h3><p class="muted">' +
     (p.role === "Approver" ? "Approvers decide on submitted memos in the panel on the right. Switch to Dana or Raj to chat." :
-      "Ask in your own words. The agent maps your criteria, waits for you to confirm, and proposes changes for you to accept on the right.") +
+      "Ask in your own words. The agent maps your criteria, waits for you to confirm, and proposes changes, which show up in the conversation and are accepted in review.") +
     '</p><div class="chips">' + (p.role === "Approver" ? "" : SUGGESTIONS.map(function (s) { return '<button class="chip" data-s="' + esc(s) + '">' + esc(s.length > 60 ? s.slice(0, 57) + "..." : s) + "</button>"; }).join("")) + "</div></div>";
   Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (b) { b.onclick = function () { $("input").value = b.getAttribute("data-s"); $("input").focus(); }; });
 }
@@ -285,6 +306,7 @@ async function send(text) {
   var t = titles(); if (!t[state.thread]) { t[state.thread] = text.slice(0, 60); store("dr-titles", t); }
   addMessage("user", text);
   setBusy(true);
+  var before = await pendingIds();
   try {
     var r = await api("/api/agents/" + AGENT + "/generate", {
       method: "POST",
@@ -295,12 +317,36 @@ async function send(text) {
       })
     });
     addMessage("assistant", r.text || "(No reply text.)");
+    await showNewProposals(before);
   } catch (e) {
     var hint = /API key/i.test(e.message) ? "\\n\\nAdd your key to .env as ANTHROPIC_API_KEY=... and restart npm run dev." : "";
     addMessage("assistant", e.message + hint, { error: true });
   } finally {
     setBusy(false); loadThreads(); refreshSide(); $("input").focus();
   }
+}
+
+// ---- Proposals in the conversation ----
+// As in Claude, a turn's new proposals show under the reply with a link to
+// review them. Nothing is accepted from the conversation (agentic FR51).
+async function pendingIds() {
+  try { return (await api("/poc/proposals?status=pending")).proposals.map(function (x) { return x.id; }); } catch (e) { return null; }
+}
+async function showNewProposals(before) {
+  if (!before) return;
+  try {
+    var fresh = (await api("/poc/proposals?status=pending")).proposals.filter(function (x) { return before.indexOf(x.id) < 0; });
+    if (!fresh.length) return;
+    var last = $("messages").lastElementChild;
+    if (!last) return;
+    var box = document.createElement("div");
+    box.className = "inline-proposals";
+    box.innerHTML = '<div class="row"><b class="small">' + fresh.length + (fresh.length === 1 ? " proposal" : " proposals") + ' waiting for you</b>' +
+      '<a class="small" href="/poc/review" target="_blank" rel="noopener">Review to accept or reject →</a></div>' +
+      fresh.map(function (x) { return proposalCard(x, false); }).join("");
+    last.appendChild(box);
+    $("messages").scrollTop = $("messages").scrollHeight;
+  } catch (e) {}
 }
 
 // ---- Side panel ----
@@ -377,8 +423,67 @@ async function refreshSide() {
       act(function () { return api("/poc/tenants/" + TENANT + "/kill-switch", { method: "POST", body: JSON.stringify({ engaged: !k.engaged }) }); });
     };
   } catch (e) { flash(e.message); }
+  refreshDealpath();
   refreshActivity();
 }
+
+// ---- Dealpath connection ----
+async function refreshDealpath() {
+  try {
+    var s = await api("/poc/dealpath/status");
+    $("dp").innerHTML = s.connected
+      ? '<span class="pill">Dealpath connected</span> <button id="dpOff">Disconnect</button>'
+      : '<a class="chip" href="/poc/dealpath/connect" title="Optional: read real deals from Dealpath through its MCP server. The prototype runs on its built-in sample deals without it.">Connect Dealpath (optional)</a>';
+    if (s.connected) $("dpOff").onclick = function () { act(function () { return api("/poc/dealpath/disconnect", { method: "POST" }); }); };
+  } catch (e) { $("dp").textContent = ""; }
+}
+
+// ---- The saved buy box: any role reads it, a DealLead edits it ----
+var buyBox = { criteria: [], dirty: false };
+function renderBuyBox() {
+  var canEdit = persona().role === "DealLead";
+  var rowsHtml = buyBox.criteria.map(function (c, i) {
+    return '<div class="bb"><input type="text" data-bb="' + i + '" value="' + esc(c.criterion) + '"' + (canEdit ? "" : " disabled") + '>' +
+      '<label><input type="checkbox" data-bbmust="' + i + '"' + (c.mustHave ? " checked" : "") + (canEdit ? "" : " disabled") + '> must-have</label>' +
+      (canEdit ? '<button data-bbdel="' + i + '" title="Remove">x</button>' : "") + "</div>";
+  }).join("");
+  $("buybox").innerHTML = '<div class="card">' + (rowsHtml || '<div class="muted small">No criteria.</div>') +
+    (canEdit ? '<div class="actions"><button id="bbAdd">+ Add criterion</button><button class="primary" id="bbSave"' + (buyBox.dirty ? "" : " disabled") + '>Save buy box</button></div>'
+             : '<div class="muted small">Only the DealLead can change the buy box.</div>') +
+    '<div class="muted small" style="margin-top:6px">Ask: "Check &lt;deal&gt; against the buy box." You confirm the field mapping before anything is checked.</div></div>';
+  if (!canEdit) return;
+  Array.prototype.forEach.call(document.querySelectorAll("[data-bb]"), function (el) { el.oninput = function () { buyBox.criteria[+el.dataset.bb].criterion = el.value; markDirty(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-bbmust]"), function (el) { el.onchange = function () { buyBox.criteria[+el.dataset.bbmust].mustHave = el.checked; markDirty(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-bbdel]"), function (el) { el.onclick = function () { buyBox.criteria.splice(+el.dataset.bbdel, 1); buyBox.dirty = true; renderBuyBox(); }; });
+  $("bbAdd").onclick = function () { buyBox.criteria.push({ criterion: "", mustHave: false }); buyBox.dirty = true; renderBuyBox(); var last = document.querySelectorAll("[data-bb]"); if (last.length) last[last.length - 1].focus(); };
+  $("bbSave").onclick = function () {
+    act(async function () {
+      var saved = await api("/poc/buy-box?tenantId=" + TENANT, { method: "PUT", body: JSON.stringify({ criteria: buyBox.criteria }) });
+      buyBox = { criteria: saved.criteria, dirty: false }; renderBuyBox(); flash("Buy box saved.");
+    });
+  };
+}
+function markDirty() { if (!buyBox.dirty) { buyBox.dirty = true; var s = $("bbSave"); if (s) s.disabled = false; } }
+async function loadBuyBox() {
+  try { var r = await api("/poc/buy-box?tenantId=" + TENANT); buyBox = { criteria: r.criteria, dirty: false }; renderBuyBox(); }
+  catch (e) { $("buybox").innerHTML = '<div class="muted small">Could not load the buy box.</div>'; }
+}
+
+// ---- Attach an OM: uploaded as a PDF, then named in the message ----
+$("file").onchange = function () {
+  var f = $("file").files[0]; if (!f) return;
+  var reader = new FileReader();
+  reader.onload = function () {
+    var data = String(reader.result).split(",")[1] || "";
+    act(async function () {
+      var doc = await api("/poc/documents?tenantId=" + TENANT, { method: "POST", body: JSON.stringify({ name: f.name, data: data }) });
+      var v = $("input").value.trim();
+      $("input").value = (v ? v + " " : "") + "Attached OM: " + doc.name + " (" + doc.id + ", " + doc.pages + " pages).";
+      autosize(); $("input").focus(); flash("Attached " + doc.name + ". Name the deal, then send.");
+    }).finally(function () { $("file").value = ""; });
+  };
+  reader.readAsDataURL(f);
+};
 document.addEventListener("click", function (e) {
   var b = e.target.closest("button"); if (!b) return;
   if (b.dataset.accept) act(function () { return api("/poc/proposals/" + b.dataset.accept + "/accept", { method: "POST" }); });
@@ -395,11 +500,14 @@ $("input").addEventListener("input", autosize);
 $("newThread").onclick = newThread;
 $("persona").onchange = function () {
   store("dr-persona", $("persona").value);
+  renderBuyBox();
   var last = store("dr-thread-" + persona().id);
   if (last && persona().role !== "Approver") openThread(last); else { state.thread = null; showEmpty(); loadThreads(); refreshSide(); }
 };
 (function start() {
   var saved = store("dr-persona"); if (saved) $("persona").value = saved;
+  loadBuyBox();
+  if (/dealpath=connected/.test(location.search)) flash("Dealpath connected. Ask for a deal by name.");
   var last = store("dr-thread-" + persona().id);
   if (last && persona().role !== "Approver") openThread(last); else { showEmpty(); loadThreads(); refreshSide(); }
   setInterval(function () { if (!state.busy) refreshSide(); }, 15000);

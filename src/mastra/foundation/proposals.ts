@@ -189,7 +189,8 @@ async function saveAndSubmitMemo(p: Proposal, userId: string) {
 // fields, so no proposal can reach them.
 async function setField(p: Proposal, userId: string) {
   const { fieldKey, value, previous, source } = p.payload;
-  if (!dealFields.some((f) => f.key === fieldKey)) throw new DecisionError(`${fieldKey} is not a deal field.`, 400);
+  // A Dealpath deal's fields are checked when the proposal is made (propose-field-value).
+  if (!p.dealId.startsWith("DP-") && !dealFields.some((f) => f.key === fieldKey)) throw new DecisionError(`${fieldKey} is not a deal field.`, 400);
   const t = now();
   await run(
     `INSERT INTO poc_field_values (deal_id, field_key, value, proposal_id, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?)

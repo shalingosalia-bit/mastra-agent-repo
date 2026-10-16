@@ -32,6 +32,7 @@ export const REVIEW_PAGE = /* html */ `<!doctype html>
 <main>
   <h1>Deal review panel</h1>
   <div class="muted">Proposals the agents made, waiting for the DealLead. Agents cannot act here.</div>
+  <div class="muted">Stands in for card #24: where the DealLead accepts in the headless POC, in Claude or in the app, is still open.</div>
   <div class="bar">
     <label>Acting as <select id="user">
       <option value="U-1">Dana Kim (DealLead)</option>

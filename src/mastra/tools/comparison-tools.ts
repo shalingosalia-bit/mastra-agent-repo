@@ -1,6 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { comps, dealFields, findDeal, readValue } from "../data/fixtures";
+import { ensureDeal } from "../data/dealpath/deals";
 import { authorize } from "../foundation/guard";
 import { recordSources, type Sourced } from "../foundation/sessions";
 
@@ -32,7 +33,7 @@ export const compareToCompsTool = createTool({
     const auth = await authorize("compare-to-comps", "comps.read", context);
     if (!auth.ok) return auth;
     const role = auth.actor.role;
-    const deal = findDeal(dealId);
+    const deal = (await ensureDeal(dealId));
     if (!deal) return { found: false as const, message: `No deal ${dealId}.` };
     const market = readValue(deal, "market", role);
     const type = readValue(deal, "property_type", role);
@@ -98,7 +99,7 @@ export const listCompsTool = createTool({
     if (!auth.ok) return auth;
     let m = market, t = propertyType;
     if (dealId) {
-      const deal = findDeal(dealId);
+      const deal = (await ensureDeal(dealId));
       if (!deal) return { found: false as const, message: `No deal ${dealId}.` };
       m ??= String(readValue(deal, "market", auth.actor.role) ?? "");
       t ??= String(readValue(deal, "property_type", auth.actor.role) ?? "");
