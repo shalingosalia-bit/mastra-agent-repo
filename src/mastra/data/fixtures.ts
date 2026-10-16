@@ -34,6 +34,10 @@ export interface Deal {
   name: string;
   stage: string;
   fields: Record<string, FieldValue>;
+  // A deal read from Dealpath (data/dealpath/deals.ts): its fields keep their
+  // Dealpath names, and Dealpath has already applied the User's permissions.
+  origin?: { system: "dealpath"; id: number; workflow?: string };
+  fieldDefs?: FieldDef[];
 }
 
 export const deals: Deal[] = [
@@ -152,11 +156,38 @@ export function visibleFields(role: Role): FieldDef[] {
   return dealFields.filter((f) => canSee(f, role));
 }
 
+// Dealpath field definitions met by search, registered by data/dealpath/deals.ts.
+let dealpathFieldLookup: (key: string) => FieldDef | undefined = () => undefined;
+export function useDealpathFields(lookup: (key: string) => FieldDef | undefined) {
+  dealpathFieldLookup = lookup;
+}
+
+// The definition of one of this deal's fields, or undefined if it has none.
+export function fieldDefFor(deal: Deal, key: string): FieldDef | undefined {
+  if (!deal.origin) return dealFields.find((f) => f.key === key);
+  const k = key.toLowerCase();
+  return deal.fieldDefs?.find((f) => f.key.toLowerCase() === k) ?? dealpathFieldLookup(key);
+}
+
+// The fields a role can read on this deal: the sandbox's, or the Dealpath deal's own.
+export function fieldsOf(deal: Deal, role: Role): FieldDef[] {
+  return deal.origin ? deal.fieldDefs ?? [] : visibleFields(role);
+}
+
 // The deal's value for a field as this role sees it: null when absent or hidden.
 export function readValue(deal: Deal, key: string, role: Role): FieldValue {
+  if (deal.origin) {
+    const def = fieldDefFor(deal, key);
+    return def ? deal.fields[def.key] ?? null : null;
+  }
   const def = dealFields.find((f) => f.key === key);
   if (!def || !canSee(def, role)) return null;
   return deal.fields[key] ?? null;
+}
+
+// Where a value came from, as the DealLead would find it.
+export function sourceOf(deal: Deal, label: string): string {
+  return deal.origin ? `Dealpath › ${deal.name} › ${label}` : `${deal.name} › ${label}`;
 }
 
 // ---- Accepted field values. Only a DealLead's acceptance of a proposal sets one
@@ -164,18 +195,25 @@ export function readValue(deal: Deal, key: string, role: Role): FieldValue {
 
 const originalFields = new Map(deals.map((d) => [d.id, { ...d.fields }]));
 
+// Kept by deal id, so a Dealpath deal loaded after start-up still shows them.
+export const acceptedValues = new Map<string, Record<string, FieldValue>>();
+
 export function setFieldValue(dealId: string, key: string, value: FieldValue) {
+  acceptedValues.set(dealId, { ...acceptedValues.get(dealId), [key]: value });
   const deal = deals.find((d) => d.id === dealId);
   if (deal) deal.fields[key] = value;
 }
 
 // For tests: the fixtures as shipped.
 export function restoreFixtures() {
+  acceptedValues.clear();
+  for (let i = deals.length - 1; i >= 0; i--) if (deals[i].origin) deals.splice(i, 1);
   for (const d of deals) d.fields = { ...originalFields.get(d.id)! };
 }
 
 // A value as the field's type expects it, or why it can't be.
 export function coerceValue(field: FieldDef, raw: string | number): { ok: true; value: string | number } | { ok: false; message: string } {
+  if (field.type === "option" && !field.options?.length) return { ok: true, value: String(raw).trim() };
   if (field.type === "option") {
     const option = field.options?.find((o) => o.toLowerCase() === String(raw).trim().toLowerCase());
     return option ? { ok: true, value: option } : { ok: false, message: `${field.label} must be one of: ${field.options?.join(", ")}.` };

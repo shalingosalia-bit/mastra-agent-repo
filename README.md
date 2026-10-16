@@ -28,6 +28,14 @@ Then open the **review panel** at http://localhost:4111/poc/review:
 
 The DealLead accepts proposals only in the panel. The supervisor can't accept, save or submit anything.
 
+### Real deals, the saved buy box and OMs
+
+The app is an agent test bench. It stands in for Claude, the POC's headless surface (card #23), until the agents are exposed over MCP. Its review panel stands in for card #24, and its buy box editor for card #29.
+
+- **Dealpath deals:** click **Connect Dealpath** and sign in once. The app asks Dealpath's MCP server (`https://mcp.dealpath.com/mcp`) for `mcp:read` only, and keeps the tokens in `~/.config/mastra-agent-repo/`, outside the repository. Then ask for any deal by name, e.g. `Check Shady Grove Logistics against the buy box.` When several deals match, the agent asks which one. Each value cites its Dealpath field, and nothing is written back to Dealpath.
+- **The saved buy box:** the side panel shows the Tenant's buy box, and a DealLead adds, edits or removes criteria and marks must-haves. "Against the buy box" screens with it, and you still confirm the field mapping first.
+- **An OM:** **Attach OM** uploads a PDF and names it in your message. The agent reads it page by page, and offers a value found only in the OM as a proposal citing its page. The verdict stays Unknown until you accept it.
+
 ### The deal-review workflow
 
 **Workflows → deal-review** runs the standard review as a fixed sequence, with each pause for the DealLead enforced by the engine rather than the supervisor's instructions (`workflows/deal-review.ts`, built from `workflows/screening-steps.ts`). Every input and reply is a sentence in your own words, and the run is its own session, at `/poc/sessions/<runId>`.

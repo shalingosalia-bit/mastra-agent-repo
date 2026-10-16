@@ -6,6 +6,8 @@ import type { Role } from "../data/fixtures";
 
 export type Grant =
   | "deal.read"
+  | "buybox.read"
+  | "documents.read"
   | "fields.read"
   | "comps.read"
   | "team.read"
@@ -29,8 +31,8 @@ export interface AgentEntry {
 export const registry: Record<string, AgentEntry> = {
   "deal-review": { id: "deal-review", version: "0.3.0", pillar: "Foundation", pod: "AI Platform", grants: ["session.read"] },
   screening: {
-    id: "screening", version: "0.3.0", pillar: "Pipeline", pod: "Connect & Pipeline",
-    grants: ["deal.read", "fields.read", "propose.field"],
+    id: "screening", version: "0.4.0", pillar: "Pipeline", pod: "Connect & Pipeline",
+    grants: ["deal.read", "fields.read", "buybox.read", "documents.read", "propose.field"],
   },
   comparison: {
     id: "comparison", version: "0.3.0", pillar: "Analysis", pod: "Deal & Portfolio",
@@ -49,8 +51,8 @@ export const registry: Record<string, AgentEntry> = {
 // What each role may do on a deal, as the deal page allows it. Accepting a
 // proposal is a person's act and is never granted to an agent.
 export const roleGrants: Record<Role, (Grant | "proposal.accept")[]> = {
-  DealLead: ["deal.read", "fields.read", "comps.read", "team.read", "tasks.read", "session.read", "propose.task", "propose.memo", "propose.field", "propose.note", "proposal.accept"],
-  Analyst: ["deal.read", "fields.read", "comps.read", "team.read", "tasks.read", "session.read", "propose.task", "propose.memo", "propose.field", "propose.note"],
+  DealLead: ["deal.read", "buybox.read", "documents.read", "fields.read", "comps.read", "team.read", "tasks.read", "session.read", "propose.task", "propose.memo", "propose.field", "propose.note", "proposal.accept"],
+  Analyst: ["deal.read", "buybox.read", "documents.read", "fields.read", "comps.read", "team.read", "tasks.read", "session.read", "propose.task", "propose.memo", "propose.field", "propose.note"],
 };
 
 export function versionOf(agentId: string): string {

@@ -18,5 +18,6 @@ export const mastra = new Mastra({
     url: process.env.MASTRA_DB_URL ?? "file:./mastra.db",
     authToken: process.env.MASTRA_DB_AUTH_TOKEN || undefined,
   }),
-  server: { apiRoutes: pocRoutes },
+  // An uploaded OM arrives as base64 JSON, up to 20 MB of PDF.
+  server: { apiRoutes: pocRoutes, bodySizeLimit: 30 * 1024 * 1024 },
 });

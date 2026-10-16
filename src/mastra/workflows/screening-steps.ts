@@ -1,7 +1,8 @@
 import type { RequestContext } from "@mastra/core/request-context";
 import { createStep } from "@mastra/core/workflows";
 import { z } from "zod";
-import { findDeal, visibleFields } from "../data/fixtures";
+import { fieldDefFor, visibleFields, type Deal } from "../data/fixtures";
+import { ensureDeal } from "../data/dealpath/deals";
 import { roleFrom } from "../tools/context";
 import { checkCriteriaTool } from "../tools/screening-tools";
 import { inSession } from "./shared";
@@ -50,6 +51,13 @@ function readableFields(rc: RequestContext) {
   return new Map(visibleFields(roleFrom({ requestContext: rc })).map((f) => [f.key, f.label]));
 }
 
+// A field's label if this User can read it on this deal: a sandbox field their
+// role sees, or a Dealpath field Dealpath returned for them.
+function labelOf(deal: Deal | undefined, key: string, rc: RequestContext): string | undefined {
+  if (deal?.origin) return fieldDefFor(deal, key)?.label;
+  return readableFields(rc).get(key);
+}
+
 function describe(m: z.infer<typeof mapping>) {
   const lines = m.criteria.map((c) =>
     c.fieldKey ? `- ${c.criterion} → ${c.fieldLabel} ${c.operator} ${JSON.stringify(c.target)}` : `- ${c.criterion} → no field. ${c.question}`);
@@ -73,14 +81,13 @@ export const resolveCriteria = createStep({
       { requestContext: rc, structuredOutput: { schema: resolved } },
     );
 
-    const deal = findDeal(out.object.deal);
+    const deal = await ensureDeal(out.object.deal);
     if (!deal) throw new Error(`No deal matches "${out.object.deal}". Start a new run naming the deal.`);
 
     // A field the model names must exist and be readable by this User; anything
     // else becomes a question, never a guess (eval case 1).
-    const readable = readableFields(rc);
     const criteria = out.object.criteria.map((m) => {
-      const label = m.fieldKey ? readable.get(m.fieldKey) : undefined;
+      const label = m.fieldKey ? labelOf(deal, m.fieldKey, rc) : undefined;
       if (!m.fieldKey || !label || !m.operator || m.target === null) {
         return {
           criterion: m.criterion, fieldKey: null, fieldLabel: null, operator: null, target: null,
@@ -122,8 +129,8 @@ export const confirmMapping = createStep({
       return { dealId: inputData.dealId, confirmed: [], unresolved: inputData.criteria.map((c) => c.criterion), stopped: true };
     }
 
-    const readable = readableFields(rc);
-    const corrections = new Map(out.object.corrections.filter((c) => readable.has(c.fieldKey)).map((c) => [c.criterion, c]));
+    const deal = await ensureDeal(inputData.dealId);
+    const corrections = new Map(out.object.corrections.filter((c) => labelOf(deal, c.fieldKey, rc) !== undefined).map((c) => [c.criterion, c]));
     const confirmed: z.infer<typeof confirmedCriterion>[] = [];
     const unresolved: string[] = [];
     for (const c of inputData.criteria) {

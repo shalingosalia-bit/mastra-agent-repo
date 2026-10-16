@@ -1,6 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { canSee, coerceValue, dealFields, dealTeams, findDeal, readValue } from "../data/fixtures";
+import { canSee, coerceValue, dealTeams, fieldDefFor, findDeal, readValue } from "../data/fixtures";
+import { ensureDeal } from "../data/dealpath/deals";
 import { authorize } from "../foundation/guard";
 import { listProposals, propose, threeBusinessDaysFrom } from "../foundation/proposals";
 import { listSources, type Sourced } from "../foundation/sessions";
@@ -19,7 +20,7 @@ export const proposeTaskTool = createTool({
   execute: async ({ dealId, criterion, title, assigneeId }, context) => {
     const auth = await authorize("propose-task", "propose.task", context);
     if (!auth.ok) return auth;
-    const deal = findDeal(dealId);
+    const deal = (await ensureDeal(dealId));
     if (!deal) return { created: false as const, message: `No deal ${dealId}.` };
 
     let assignee: { id: string; name: string } | null = null;
@@ -82,7 +83,7 @@ export const proposeMemoTool = createTool({
   execute: async ({ dealId, title, decision, figures, body }, context) => {
     const auth = await authorize("propose-memo", "propose.memo", context);
     if (!auth.ok) return auth;
-    const deal = findDeal(dealId);
+    const deal = (await ensureDeal(dealId));
     if (!deal) return { created: false as const, message: `No deal ${dealId}.` };
 
     // Eval case 12: every figure traces to a value this session sourced.
@@ -138,22 +139,22 @@ export const proposeFieldValueTool = createTool({
   execute: async ({ dealId, fieldKey, value, source }, context) => {
     const auth = await authorize("propose-field-value", "propose.field", context);
     if (!auth.ok) return auth;
-    const deal = findDeal(dealId);
+    const deal = await ensureDeal(dealId);
     if (!deal) return { created: false as const, message: `No deal ${dealId}.` };
-    const field = dealFields.find((f) => f.key === fieldKey);
+    const field = fieldDefFor(deal, fieldKey);
     // A field the caller cannot read answers as if it did not exist.
-    if (!field || !canSee(field, auth.actor.role)) {
+    if (!field || (!deal.origin && !canSee(field, auth.actor.role))) {
       return { created: false as const, message: `${fieldKey} is not a deal field you can set. Use describe-deal-fields.` };
     }
     const coerced = coerceValue(field, value);
     if (!coerced.ok) return { created: false as const, message: coerced.message };
-    const previous = readValue(deal, fieldKey, auth.actor.role);
+    const previous = readValue(deal, field.key, auth.actor.role);
     if (previous !== null && String(previous) === String(coerced.value)) {
       return { created: false as const, message: `${field.label} is already ${previous}.` };
     }
 
-    const { proposal, duplicate } = await propose("field_value", deal.id, `field:${deal.id}:${fieldKey}:${coerced.value}`, {
-      title: `Set ${field.label} to ${coerced.value}`, fieldKey, fieldLabel: field.label, value: coerced.value, previous, source,
+    const { proposal, duplicate } = await propose("field_value", deal.id, `field:${deal.id}:${field.key}:${coerced.value}`, {
+      title: `Set ${field.label} to ${coerced.value}`, fieldKey: field.key, fieldLabel: field.label, value: coerced.value, previous, source,
     }, auth);
     return { created: !duplicate, duplicate, proposal: { id: proposal.id, status: proposal.status, ...proposal.payload } };
   },
@@ -173,7 +174,7 @@ export const proposeTaskChangeTool = createTool({
   execute: async ({ dealId, workItemId, assigneeId, dueDate, reason }, context) => {
     const auth = await authorize("propose-task-change", "propose.task", context);
     if (!auth.ok) return auth;
-    const deal = findDeal(dealId);
+    const deal = (await ensureDeal(dealId));
     if (!deal) return { created: false as const, message: `No deal ${dealId}.` };
     const item = await one<{ id: string; title: string }>(`SELECT id, title FROM poc_work_items WHERE id = ? AND deal_id = ?`, [workItemId, deal.id]);
     if (!item) return { created: false as const, message: `No task ${workItemId} on ${deal.name}. Use list-deal-tasks.` };
@@ -209,7 +210,7 @@ export const proposeDealNoteTool = createTool({
   execute: async ({ dealId, note }, context) => {
     const auth = await authorize("propose-deal-note", "propose.note", context);
     if (!auth.ok) return auth;
-    const deal = findDeal(dealId);
+    const deal = (await ensureDeal(dealId));
     if (!deal) return { created: false as const, message: `No deal ${dealId}.` };
     const { proposal, duplicate } = await propose("note", deal.id, `note:${deal.id}:${note.trim().toLowerCase()}`, {
       title: "Add a note", note: note.trim(),
