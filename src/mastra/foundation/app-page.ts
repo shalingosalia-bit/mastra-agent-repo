@@ -98,6 +98,10 @@ export const APP_PAGE = /* html */ `<!doctype html>
   .attach { cursor:pointer; align-self:flex-end; }
   .hint { margin-top:6px; }
   .note { font-size:12px; color:var(--muted); margin:-4px 2px 8px; }
+  .inline-proposals { margin-top:8px; border:1px dashed var(--line); border-radius:12px; padding:10px 12px; background:var(--panel); }
+  .inline-proposals .card { margin:6px 0 0; }
+  .inline-proposals > .row { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .inspector { font-size:15px; font-weight:600; margin:2px 2px 2px; }
 </style>
 </head>
 <body>
@@ -138,6 +142,8 @@ export const APP_PAGE = /* html */ `<!doctype html>
 
   <aside class="side">
     <div class="flash" id="flash"></div>
+    <div class="inspector">Inspector</div>
+    <div class="note">Stands in for what a headless DealLead sees elsewhere: in Claude the buy box is read with get_buy_box and changed in chat, tool calls show as Claude's own, and proposals arrive as a link to review.</div>
     <h2>Buy box</h2>
     <div class="note">Stands in for card #29: where a DealLead edits the buy box when headless is still open.</div>
     <div id="buybox"></div>
@@ -241,7 +247,7 @@ function showEmpty() {
   var p = persona();
   $("messages").innerHTML = '<div class="empty"><h3>Start a deal review</h3><p class="muted">' +
     (p.role === "Approver" ? "Approvers decide on submitted memos in the panel on the right. Switch to Dana or Raj to chat." :
-      "Ask in your own words. The agent maps your criteria, waits for you to confirm, and proposes changes for you to accept on the right.") +
+      "Ask in your own words. The agent maps your criteria, waits for you to confirm, and proposes changes, which show up in the conversation and are accepted in review.") +
     '</p><div class="chips">' + (p.role === "Approver" ? "" : SUGGESTIONS.map(function (s) { return '<button class="chip" data-s="' + esc(s) + '">' + esc(s.length > 60 ? s.slice(0, 57) + "..." : s) + "</button>"; }).join("")) + "</div></div>";
   Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (b) { b.onclick = function () { $("input").value = b.getAttribute("data-s"); $("input").focus(); }; });
 }
@@ -300,6 +306,7 @@ async function send(text) {
   var t = titles(); if (!t[state.thread]) { t[state.thread] = text.slice(0, 60); store("dr-titles", t); }
   addMessage("user", text);
   setBusy(true);
+  var before = await pendingIds();
   try {
     var r = await api("/api/agents/" + AGENT + "/generate", {
       method: "POST",
@@ -310,12 +317,36 @@ async function send(text) {
       })
     });
     addMessage("assistant", r.text || "(No reply text.)");
+    await showNewProposals(before);
   } catch (e) {
     var hint = /API key/i.test(e.message) ? "\\n\\nAdd your key to .env as ANTHROPIC_API_KEY=... and restart npm run dev." : "";
     addMessage("assistant", e.message + hint, { error: true });
   } finally {
     setBusy(false); loadThreads(); refreshSide(); $("input").focus();
   }
+}
+
+// ---- Proposals in the conversation ----
+// As in Claude, a turn's new proposals show under the reply with a link to
+// review them. Nothing is accepted from the conversation (agentic FR51).
+async function pendingIds() {
+  try { return (await api("/poc/proposals?status=pending")).proposals.map(function (x) { return x.id; }); } catch (e) { return null; }
+}
+async function showNewProposals(before) {
+  if (!before) return;
+  try {
+    var fresh = (await api("/poc/proposals?status=pending")).proposals.filter(function (x) { return before.indexOf(x.id) < 0; });
+    if (!fresh.length) return;
+    var last = $("messages").lastElementChild;
+    if (!last) return;
+    var box = document.createElement("div");
+    box.className = "inline-proposals";
+    box.innerHTML = '<div class="row"><b class="small">' + fresh.length + (fresh.length === 1 ? " proposal" : " proposals") + ' waiting for you</b>' +
+      '<a class="small" href="/poc/review" target="_blank" rel="noopener">Review to accept or reject →</a></div>' +
+      fresh.map(function (x) { return proposalCard(x, false); }).join("");
+    last.appendChild(box);
+    $("messages").scrollTop = $("messages").scrollHeight;
+  } catch (e) {}
 }
 
 // ---- Side panel ----
