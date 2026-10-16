@@ -7,10 +7,13 @@ import { dealReviewSupervisor } from "./agents/supervisor";
 import { taskAgent } from "./agents/task";
 import { pocRoutes } from "./foundation/routes";
 import { dealReviewWorkflow } from "./workflows/deal-review";
+import { dealReviewMcpServer } from "./mcp/deal-review-server";
 
 export const mastra = new Mastra({
   agents: { dealReviewSupervisor, screeningAgent, comparisonAgent, taskAgent, memoAgent },
   workflows: { dealReviewWorkflow },
+  // The headless surface: Claude connects to /api/mcp/deal-review/mcp (card #23).
+  mcpServers: { dealReview: dealReviewMcpServer },
   // One database for Mastra's threads and memory and the POC's records. A local
   // file by default; a hosted LibSQL (Turso) URL and token keep both across deploys.
   storage: new LibSQLStore({

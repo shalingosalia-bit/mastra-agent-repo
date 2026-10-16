@@ -101,7 +101,7 @@ export const APP_PAGE = /* html */ `<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Deal Review <span class="muted small">· agent test bench, standing in for Claude until the MCP surface lands (card #23)</span></h1>
+  <h1>Deal Review <span class="muted small">· agent test bench. The POC surface is Claude, through /api/mcp/deal-review/mcp (card #23)</span></h1>
   <div class="right">
     <label class="small">Acting as
       <select id="persona">
