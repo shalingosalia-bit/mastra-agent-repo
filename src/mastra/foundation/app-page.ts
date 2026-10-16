@@ -96,6 +96,7 @@ export const APP_PAGE = /* html */ `<!doctype html>
   .bb input[type=text] { flex:1; min-width:0; font:inherit; font-size:13px; padding:5px 7px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:inherit; }
   .bb label { font-size:12px; white-space:nowrap; }
   .attach { cursor:pointer; align-self:flex-end; }
+  .hint { margin-top:6px; }
   .note { font-size:12px; color:var(--muted); margin:-4px 2px 8px; }
 </style>
 </head>
@@ -128,9 +129,10 @@ export const APP_PAGE = /* html */ `<!doctype html>
       <div class="working" id="working"></div>
       <form id="form">
         <textarea id="input" rows="1" placeholder="Ask the deal review agent... (Enter to send, Shift+Enter for a new line)"></textarea>
-        <label class="attach" title="Attach an OM as a PDF; the agent reads it page by page"><input type="file" id="file" accept="application/pdf" hidden><span class="chip">Attach OM</span></label>
+        <label class="attach" title="Optional: attach an OM as a PDF and the agent reads it page by page. The sample deals do not need one: tell the agent a figure and who stated it instead."><input type="file" id="file" accept="application/pdf" hidden><span class="chip">Attach OM</span></label>
         <button class="primary" id="send" type="submit">Send</button>
       </form>
+      <div class="hint small muted">Prototype: runs on the sample deals Riverside Flats (D-1001) and Lamar Station (D-1002). Attach OM and Connect Dealpath are optional and not needed for the demo.</div>
     </div>
   </section>
 
@@ -153,8 +155,8 @@ var TENANT = "T-demo";
 var SUGGESTIONS = [
   "What deals do we have in screening right now?",
   "Screen Riverside Flats: multifamily only, cap rate at least 5.5%, asking price under $60M, seller reserve under $57M.",
-  "Check Shady Grove Logistics against the buy box.",
   "Screen Riverside Flats against the buy box.",
+  "The asking price for Riverside Flats is $58M, per the broker.",
   "How does Riverside stack up against recent sales in Austin?",
   "Where are we on this review?"
 ];
@@ -400,7 +402,7 @@ async function refreshDealpath() {
     var s = await api("/poc/dealpath/status");
     $("dp").innerHTML = s.connected
       ? '<span class="pill">Dealpath connected</span> <button id="dpOff">Disconnect</button>'
-      : '<a class="chip" href="/poc/dealpath/connect">Connect Dealpath</a>';
+      : '<a class="chip" href="/poc/dealpath/connect" title="Optional: read real deals from Dealpath through its MCP server. The prototype runs on its built-in sample deals without it.">Connect Dealpath (optional)</a>';
     if (s.connected) $("dpOff").onclick = function () { act(function () { return api("/poc/dealpath/disconnect", { method: "POST" }); }); };
   } catch (e) { $("dp").textContent = ""; }
 }
